@@ -15,11 +15,25 @@ interface DashboardData {
 export default function Home() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [syncMsg, setSyncMsg] = useState("");
   const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
-    dashboardApi.get().then((r) => { setData(r.data); setLoading(false); }).catch(() => setLoading(false));
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    if (!token) {
+      setLoading(false);
+      setError("unauthenticated");
+      return;
+    }
+    dashboardApi.get().then((r) => { setData(r.data); setLoading(false); }).catch((e) => {
+      setLoading(false);
+      if (e.response?.status === 401) {
+        setError("unauthenticated");
+      } else {
+        setError("network");
+      }
+    });
   }, []);
 
   const handleSyncAll = async () => {
@@ -66,7 +80,12 @@ export default function Home() {
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin h-8 w-8 border-4 border-blue-600 border-t-transparent rounded-full" />
           </div>
-        ) : !data ? (
+        ) : error === "unauthenticated" ? (
+          <div className="text-center py-16">
+            <p className="text-slate-500 mb-4">请先登录后查看 Dashboard</p>
+            <Link href="/login" className="px-4 py-2 bg-blue-600 text-white rounded-lg inline-block">去登录</Link>
+          </div>
+        ) : error === "network" ? (
           <div className="text-center py-16">
             <p className="text-slate-500 mb-4">加载失败，请检查后端是否运行</p>
             <button onClick={() => window.location.reload()} className="px-4 py-2 bg-blue-600 text-white rounded-lg">重试</button>

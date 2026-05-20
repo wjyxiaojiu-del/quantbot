@@ -50,6 +50,7 @@ const mockDashboardData = {
 describe("Home page (Dashboard)", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    Storage.prototype.getItem = jest.fn((key) => key === "token" ? "fake-token" : null);
   });
 
   it("shows loading spinner initially", () => {
@@ -58,6 +59,13 @@ describe("Home page (Dashboard)", () => {
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
     const spinner = document.querySelector(".animate-spin");
     expect(spinner).toBeInTheDocument();
+  });
+
+  it("shows login prompt when not authenticated", () => {
+    Storage.prototype.getItem = jest.fn(() => null);
+    render(<Home />);
+    expect(screen.getByText("请先登录后查看 Dashboard")).toBeInTheDocument();
+    expect(screen.getByText("去登录")).toBeInTheDocument();
   });
 
   it("renders dashboard data on success", async () => {
@@ -98,7 +106,7 @@ describe("Home page (Dashboard)", () => {
   });
 
   it("shows error state on API failure", async () => {
-    mockedDashboard.get.mockRejectedValueOnce(new Error("network"));
+    mockedDashboard.get.mockRejectedValueOnce({ response: { status: 500 } });
     render(<Home />);
 
     await waitFor(() => {
