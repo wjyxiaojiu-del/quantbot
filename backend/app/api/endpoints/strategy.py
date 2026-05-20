@@ -14,7 +14,7 @@ import pandas as pd
 router = APIRouter()
 
 
-@router.get("/", response_model=List[StrategyBrief])
+@router.get("", response_model=List[StrategyBrief])
 async def list_strategies(
     status: Optional[str] = None,
     page: int = Query(1, ge=1),
@@ -37,7 +37,7 @@ async def get_strategy(strategy_id: UUID, db: Session = Depends(get_db)):
     return strategy
 
 
-@router.post("/", response_model=StrategyOut, status_code=201)
+@router.post("", response_model=StrategyOut, status_code=201)
 async def create_strategy(data: StrategyCreate, db: Session = Depends(get_db)):
     existing = db.query(Strategy).filter(Strategy.name == data.name).first()
     if existing:

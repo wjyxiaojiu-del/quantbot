@@ -12,7 +12,7 @@ from app.models.trade import Portfolio, Position, Order
 router = APIRouter()
 
 
-@router.get("/")
+@router.get("")
 async def get_dashboard(db: Session = Depends(get_db)):
     """首页 Dashboard 数据聚合"""
     # 股票统计

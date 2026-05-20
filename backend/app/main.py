@@ -59,6 +59,7 @@ app = FastAPI(
     version=settings.VERSION,
     debug=settings.DEBUG,
     lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 app.add_middleware(RequestLoggingMiddleware)

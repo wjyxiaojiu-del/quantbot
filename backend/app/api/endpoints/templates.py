@@ -4,7 +4,7 @@ from app.services.backtest.templates import STRATEGY_TEMPLATES
 router = APIRouter()
 
 
-@router.get("/")
+@router.get("")
 async def list_templates():
     """获取所有内置策略模板"""
     return [

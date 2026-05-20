@@ -67,7 +67,7 @@ def test_login_wrong_password():
 
 def test_unauthenticated_rejected():
     """未认证请求受保护端点应被拒绝"""
-    resp = client.get("/api/v1/dashboard/")
+    resp = client.get("/api/v1/dashboard")
     assert resp.status_code in (401, 403)
 
 
@@ -103,7 +103,7 @@ def test_strategy_crud():
     headers = _auth_header()
     name = f"test_strategy_{uuid.uuid4().hex[:8]}"
 
-    resp = client.post("/api/v1/strategies/", json={
+    resp = client.post("/api/v1/strategies", json={
         "name": name, "description": "test", "code": "pass", "params": {}
     }, headers=headers)
     assert resp.status_code == 201
@@ -113,7 +113,7 @@ def test_strategy_crud():
     assert resp.status_code == 200
     assert resp.json()["name"] == name
 
-    resp = client.get("/api/v1/strategies/", headers=headers)
+    resp = client.get("/api/v1/strategies", headers=headers)
     assert resp.status_code == 200
     assert len(resp.json()) > 0
 
@@ -128,7 +128,7 @@ def test_strategy_crud():
 # ── Templates（公开）──
 
 def test_list_templates():
-    resp = client.get("/api/v1/templates/")
+    resp = client.get("/api/v1/templates")
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
@@ -137,7 +137,7 @@ def test_list_templates():
 
 
 def test_get_template():
-    resp = client.get("/api/v1/templates/")
+    resp = client.get("/api/v1/templates")
     templates = resp.json()
     tid = templates[0]["id"]
     resp = client.get(f"/api/v1/templates/{tid}")
@@ -215,7 +215,7 @@ def test_place_order():
 # ── Dashboard（受保护）──
 
 def test_dashboard():
-    resp = client.get("/api/v1/dashboard/", headers=_auth_header())
+    resp = client.get("/api/v1/dashboard", headers=_auth_header())
     assert resp.status_code == 200
     data = resp.json()
     assert "market" in data
