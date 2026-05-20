@@ -42,7 +42,7 @@ def _load_kline_df(db: Session, symbol: str, start_date, end_date) -> pd.DataFra
 
 @router.post("/run", response_model=BacktestResultOut)
 async def run_backtest(req: BacktestRequest, db: Session = Depends(get_db)):
-    """执行回测（支持多股票）"""
+    """执行回测（支持多股票 + 基准对比）"""
     kline_dict = {}
     for symbol in req.symbols:
         df = _load_kline_df(db, symbol, req.start_date, req.end_date)
@@ -50,10 +50,23 @@ async def run_backtest(req: BacktestRequest, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail=f"未找到 {symbol} 在指定区间内的 K 线数据")
         kline_dict[symbol] = df
 
+    # 加载基准数据
+    benchmark_kline = None
+    if req.benchmark_symbol:
+        benchmark_kline = _load_kline_df(db, req.benchmark_symbol, req.start_date, req.end_date)
+        if benchmark_kline.empty:
+            # 基准数据不存在时尝试从数据源拉取
+            from app.services.data import get_data_source_for_symbol
+            try:
+                ds = get_data_source_for_symbol(req.benchmark_symbol)
+                benchmark_kline = ds.fetch_kline(req.benchmark_symbol, "daily", req.start_date, req.end_date)
+            except Exception:
+                pass  # 基准拉取失败不影响回测
+
     engine = BacktestEngine(initial_cash=req.initial_cash)
 
     if len(req.symbols) == 1:
-        result = engine.run(req.strategy_code, list(kline_dict.values())[0], req.params)
+        result = engine.run(req.strategy_code, list(kline_dict.values())[0], req.params, benchmark_kline=benchmark_kline)
     else:
         result = engine.run_multi(req.strategy_code, kline_dict, req.params)
 
@@ -89,6 +102,7 @@ async def run_backtest(req: BacktestRequest, db: Session = Depends(get_db)):
         status="completed",
         metrics=result["metrics"],
         equity_curve=result["equity_curve"],
+        benchmark_curve=result.get("benchmark_curve"),
         trades=result["trades"],
     )
 

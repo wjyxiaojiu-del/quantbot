@@ -16,9 +16,8 @@ settings = get_settings()
 
 async def _quote_pusher():
     """后台任务：定时推送实时行情给 WebSocket 订阅者（线程池执行同步 IO）"""
-    from app.services.data import get_data_source
+    from app.services.data import get_data_source_for_symbol
     import functools
-    ds = get_data_source()
     loop = asyncio.get_event_loop()
 
     while True:
@@ -29,6 +28,7 @@ async def _quote_pusher():
                     if not ws_manager.subscriptions.get(symbol):
                         continue
                     try:
+                        ds = get_data_source_for_symbol(symbol)
                         data = await loop.run_in_executor(
                             None, functools.partial(ds.get_realtime_quote, symbol)
                         )

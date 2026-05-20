@@ -109,3 +109,55 @@ async def sync_all_stocks(db: Session = Depends(get_db)):
     manager = DataSyncManager(db)
     count = await manager.sync_stock_list()
     return {"message": f"同步完成，共 {count} 只股票"}
+
+
+# ── 全球市场（yfinance）──
+
+@router.get("/global/quote/{symbol}")
+async def get_global_quote(symbol: str):
+    """获取全球市场实时行情（美股/港股/加密货币/指数）"""
+    from app.services.data import get_data_source_for_symbol
+    try:
+        ds = get_data_source_for_symbol(symbol)
+        data = ds.get_realtime_quote(symbol)
+        return {"symbol": symbol, "source": ds.name, "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/global/kline/{symbol}")
+async def get_global_kline(
+    symbol: str,
+    period: str = Query("daily", pattern="^(daily|weekly|monthly)$"),
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+):
+    """获取全球市场 K 线数据（美股/港股/加密货币/指数）"""
+    from app.services.data import get_data_source_for_symbol
+    try:
+        ds = get_data_source_for_symbol(symbol)
+        df = ds.fetch_kline(symbol, period, start_date, end_date)
+        if df.empty:
+            return {"symbol": symbol, "data": [], "message": "无数据"}
+        records = []
+        for _, row in df.iterrows():
+            records.append({
+                "trade_date": str(row["trade_date"]),
+                "open": float(row["open"]),
+                "high": float(row["high"]),
+                "low": float(row["low"]),
+                "close": float(row["close"]),
+                "volume": int(row["volume"]),
+            })
+        return {"symbol": symbol, "source": ds.name, "count": len(records), "data": records}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/global/watchlist")
+async def get_global_watchlist():
+    """获取全球市场关注列表（美股/港股/加密货币/指数）"""
+    from app.services.data.yfinance_adapter import YFinanceDataSource
+    ds = YFinanceDataSource()
+    df = ds.fetch_stock_list()
+    return df.to_dict("records")

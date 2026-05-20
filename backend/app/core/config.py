@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "quantbot-secret-key-change-in-production"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
-    # Data Source: "baostock" | "eastmoney" | "akshare" | "mock"
-    DATA_SOURCE: str = "mock"
+    # Data Source: "akshare" | "baostock" | "eastmoney" | "yfinance" | "mock"
+    DATA_SOURCE: str = "akshare"
     AKSHARE_TIMEOUT: int = 30
     DATA_BATCH_SIZE: int = 1000
 

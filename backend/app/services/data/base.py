@@ -25,12 +25,16 @@ class BaseDataSource(ABC):
     @abstractmethod
     def fetch_stock_list(self) -> pd.DataFrame:
         """获取股票列表
-        
+
         Returns:
             DataFrame with columns: [symbol, name, exchange, industry, list_date]
         """
         pass
-    
+
+    def get_realtime_quote(self, symbol: str) -> dict:
+        """获取实时行情快照（子类可选实现）"""
+        return {}
+
     def normalize_symbol(self, symbol: str) -> str:
         """标准化股票代码"""
         symbol = symbol.strip().upper()

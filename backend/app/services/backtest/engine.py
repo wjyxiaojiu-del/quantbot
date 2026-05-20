@@ -146,16 +146,23 @@ class BacktestEngine:
         self.peak_equity = initial_cash
         self._halted = False
 
-    def run(self, strategy_code: str, kline_data: pd.DataFrame, params: Dict[str, Any] = None) -> dict:
+    def run(self, strategy_code: str, kline_data: pd.DataFrame, params: Dict[str, Any] = None, benchmark_kline: pd.DataFrame = None) -> dict:
         """
         执行回测
         strategy_code: 策略 Python 代码，必须定义 generate_signals(df, params) 函数
             返回 DataFrame，包含 signal 列: 1=买入, -1=卖出, 0=持有
         kline_data: K 线数据 DataFrame
         params: 策略参数
+        benchmark_kline: 基准 K 线数据（如沪深300），用于对比
         """
         if params is None:
             params = {}
+
+        # 构建基准日期→收盘价映射
+        benchmark_map = {}
+        if benchmark_kline is not None and not benchmark_kline.empty:
+            for _, row in benchmark_kline.iterrows():
+                benchmark_map[str(row["trade_date"])] = float(row["close"])
 
         try:
             # 执行策略代码
@@ -241,9 +248,9 @@ class BacktestEngine:
             self.portfolio.snapshot(trade_date)
             prev_equity = current_equity
 
-        return self._calc_metrics()
+        return self._calc_metrics(benchmark_map)
 
-    def _calc_metrics(self) -> dict:
+    def _calc_metrics(self, benchmark_map: dict = None) -> dict:
         equity_curve = self.portfolio.equity_curve
         if not equity_curve:
             return {"status": "completed", "metrics": {}, "equity_curve": [], "trades": []}
@@ -322,6 +329,34 @@ class BacktestEngine:
             "final_equity": round(final, 2),
         }
 
+        # 基准对比
+        benchmark_metrics = {}
+        if benchmark_map and len(benchmark_map) > 1:
+            bm_dates = sorted(benchmark_map.keys())
+            bm_first = benchmark_map[bm_dates[0]]
+            bm_last = benchmark_map[bm_dates[-1]]
+            bm_return = (bm_last - bm_first) / bm_first
+            bm_days = len(bm_dates)
+            bm_annual = (1 + bm_return) ** (252 / max(bm_days, 1)) - 1 if bm_days > 0 else 0
+
+            # 基准最大回撤
+            bm_prices = [benchmark_map[d] for d in bm_dates]
+            bm_series = pd.Series(bm_prices)
+            bm_cummax = bm_series.cummax()
+            bm_dd = (bm_series - bm_cummax) / bm_cummax
+            bm_max_dd = abs(bm_dd.min()) if len(bm_dd) > 0 else 0
+
+            # 超额收益
+            alpha = total_return - bm_return
+
+            benchmark_metrics = {
+                "benchmark_return": round(bm_return * 100, 2),
+                "benchmark_annual_return": round(bm_annual * 100, 2),
+                "benchmark_max_drawdown": round(bm_max_dd * 100, 2),
+                "alpha": round(alpha * 100, 2),
+            }
+            metrics.update(benchmark_metrics)
+
         trades_out = [
             {
                 "symbol": t.symbol, "side": t.side, "price": round(t.price, 4),
@@ -332,12 +367,28 @@ class BacktestEngine:
             for t in trades
         ]
 
-        return {
+        # 基准曲线
+        benchmark_curve = []
+        if benchmark_map and len(benchmark_map) > 1:
+            bm_dates = sorted(benchmark_map.keys())
+            bm_first = benchmark_map[bm_dates[0]]
+            for d in bm_dates:
+                bm_curve_val = benchmark_map[d] / bm_first * self.portfolio.initial_cash
+                benchmark_curve.append({
+                    "date": d,
+                    "equity": round(bm_curve_val, 2),
+                })
+
+        result = {
             "status": "completed",
             "metrics": metrics,
             "equity_curve": equity_curve,
             "trades": trades_out,
         }
+        if benchmark_curve:
+            result["benchmark_curve"] = benchmark_curve
+
+        return result
 
     def run_multi(self, strategy_code: str, kline_dict: Dict[str, pd.DataFrame], params: Dict[str, Any] = None) -> dict:
         """
