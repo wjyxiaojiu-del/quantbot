@@ -8,6 +8,7 @@ import logging
 import traceback
 
 from app.services.risk.manager import RiskManager, RiskConfig
+from app.services.strategy.sandbox import safe_exec_strategy
 
 logger = logging.getLogger(__name__)
 
@@ -165,32 +166,28 @@ class BacktestEngine:
                 benchmark_map[str(row["trade_date"])] = float(row["close"])
 
         try:
-            # 执行策略代码
-            namespace = {}
-            exec(strategy_code, namespace)
-
-            if "generate_signals" not in namespace:
-                return {"status": "failed", "error": "策略代码必须定义 generate_signals(df, params) 函数"}
-
-            generate_signals = namespace["generate_signals"]
-            signals_df = generate_signals(kline_data.copy(), params)
-
-            if not isinstance(signals_df, pd.DataFrame) or "signal" not in signals_df.columns:
-                return {"status": "failed", "error": "generate_signals 必须返回包含 'signal' 列的 DataFrame"}
-
+            # 使用安全沙箱执行策略代码
+            signals_df = safe_exec_strategy(strategy_code, kline_data, params)
+        except ValueError as e:
+            return {"status": "failed", "error": str(e)}
         except Exception as e:
             return {"status": "failed", "error": f"策略代码执行错误: {str(e)}\n{traceback.format_exc()}"}
 
         # 按日期遍历执行信号
+        # 规则：T 日收盘产生信号，T+1 日开盘成交（避免未来函数）
         symbol = kline_data["symbol"].iloc[0] if "symbol" in kline_data.columns else "UNKNOWN"
         prev_equity = self.initial_cash
+        rows = list(signals_df.iterrows())
+        pending_signal = None  # 待执行的信号
 
-        for i, row in signals_df.iterrows():
+        for idx in range(len(rows)):
+            i, row = rows[idx]
             trade_date = str(row.get("trade_date", i))
             close_price = float(row["close"])
+            open_price = float(row.get("open", close_price))  # 用开盘价成交
             signal = int(row.get("signal", 0))
 
-            # 更新持仓市值
+            # 更新持仓市值（用当日收盘价）
             self.portfolio.update_market_price(symbol, close_price)
 
             # 风控检查：最大回撤熔断
@@ -200,43 +197,50 @@ class BacktestEngine:
             current_equity_val = self.portfolio.total_equity
             if self.risk.check_max_drawdown(self.peak_equity, current_equity_val):
                 self._halted = True
-                # 清仓
+                # 清仓（用当日开盘价）
                 for sym in list(self.portfolio.positions.keys()):
                     if sym in self.portfolio.positions:
                         pos = self.portfolio.positions[sym]
-                        sell_price = close_price * (1 - self.slippage)
+                        sell_price = open_price * (1 - self.slippage)
                         self.portfolio.sell(sym, sell_price, pos.quantity, trade_date, self.commission_rate, reason="回撤熔断")
                 continue
 
-            # 止损/止盈检查
+            # 止损/止盈检查（用当日开盘价触发）
             if symbol in self.portfolio.positions:
                 pos = self.portfolio.positions[symbol]
-                if self.risk.check_stop_loss(pos.avg_cost, close_price):
-                    sell_price = close_price * (1 - self.slippage)
+                if self.risk.check_stop_loss(pos.avg_cost, open_price):
+                    sell_price = open_price * (1 - self.slippage)
                     self.portfolio.sell(symbol, sell_price, pos.quantity, trade_date, self.commission_rate, reason="止损")
                     continue
-                if self.risk.check_take_profit(pos.avg_cost, close_price):
-                    sell_price = close_price * (1 - self.slippage)
+                if self.risk.check_take_profit(pos.avg_cost, open_price):
+                    sell_price = open_price * (1 - self.slippage)
                     self.portfolio.sell(symbol, sell_price, pos.quantity, trade_date, self.commission_rate, reason="止盈")
                     continue
 
-            # 执行信号
-            if signal == 1:  # 买入
-                buy_price = close_price * (1 + self.slippage)
-                current_pos_value = 0
-                if symbol in self.portfolio.positions:
-                    current_pos_value = self.portfolio.positions[symbol].market_value
-                quantity = self.risk.calc_max_buy_quantity(
-                    self.portfolio.cash, buy_price, current_pos_value, self.portfolio.total_equity
-                )
-                if quantity >= 100:
-                    self.portfolio.buy(symbol, buy_price, quantity, trade_date, self.commission_rate)
+            # 执行前一日的待定信号（T 日信号在 T+1 日开盘成交）
+            if pending_signal is not None:
+                exec_price = open_price * (1 + self.slippage) if pending_signal == 1 else open_price * (1 - self.slippage)
 
-            elif signal == -1:  # 卖出
-                if symbol in self.portfolio.positions:
-                    pos = self.portfolio.positions[symbol]
-                    sell_price = close_price * (1 - self.slippage)
-                    self.portfolio.sell(symbol, sell_price, pos.quantity, trade_date, self.commission_rate)
+                if pending_signal == 1:  # 买入
+                    current_pos_value = 0
+                    if symbol in self.portfolio.positions:
+                        current_pos_value = self.portfolio.positions[symbol].market_value
+                    quantity = self.risk.calc_max_buy_quantity(
+                        self.portfolio.cash, exec_price, current_pos_value, self.portfolio.total_equity
+                    )
+                    if quantity >= 100:
+                        self.portfolio.buy(symbol, exec_price, quantity, trade_date, self.commission_rate)
+
+                elif pending_signal == -1:  # 卖出
+                    if symbol in self.portfolio.positions:
+                        pos = self.portfolio.positions[symbol]
+                        self.portfolio.sell(symbol, exec_price, pos.quantity, trade_date, self.commission_rate)
+
+                pending_signal = None
+
+            # 记录当日信号（下一日执行）
+            if signal != 0:
+                pending_signal = signal
 
             # 更新峰值
             if self.portfolio.total_equity > self.peak_equity:
@@ -259,8 +263,9 @@ class BacktestEngine:
         initial = self.portfolio.initial_cash
         final = equities[-1]
 
-        # 收益率序列
-        returns = pd.Series(self.portfolio.daily_pnl) / pd.Series(equities[:-1] + [initial])
+        # 收益率序列：daily_pnl[i] / equities[i-1]，第一天用 initial
+        equity_prev = [initial] + equities[:-1]
+        returns = pd.Series(self.portfolio.daily_pnl) / pd.Series(equity_prev)
         returns = returns.replace([np.inf, -np.inf], 0)
 
         # 最大回撤

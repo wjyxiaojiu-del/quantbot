@@ -6,7 +6,7 @@
 
 | 模块 | 功能 | 状态 |
 |------|------|------|
-| 数据源 | baostock K 线/股票列表 + 东方财富实时行情 | ✅ |
+| 数据源 | akshare(默认)/baostock/yfinance/eastmoney + 实时行情 | ✅ |
 | 策略管理 | CRUD + 代码验证 + 内置模板（双均线/MACD/RSI/布林/KNN） | ✅ |
 | 回测引擎 | 信号驱动 + 多股票 + 风控（止损止盈/仓位控制/回撤熔断） | ✅ |
 | 模拟交易 | 虚拟资金 + 佣金印花税 + A 股整手规则 | ✅ |
@@ -17,7 +17,7 @@
 
 ## 技术栈
 
-**后端：** FastAPI / SQLAlchemy / SQLite(开发) + PostgreSQL(生产) / Redis / Celery / baostock
+**后端：** FastAPI / SQLAlchemy / SQLite(开发) + PostgreSQL(生产) / Redis / Celery / akshare / yfinance
 
 **前端：** Next.js 14 / Tailwind CSS / lightweight-charts / axios
 

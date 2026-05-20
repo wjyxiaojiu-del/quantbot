@@ -50,3 +50,9 @@ htmlcov/
 # Project specific
 strategies/*.py
 !strategies/__init__.py
+
+# 回测运行产物
+backend/backtest_report.txt
+backend/backtest_results.json
+backend/run_backtest*.py
+backend/*=.py

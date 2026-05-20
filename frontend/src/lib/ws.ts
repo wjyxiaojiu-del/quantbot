@@ -19,7 +19,7 @@ class QuoteSocket {
     this.ws.onopen = () => {
       console.log("[WS] connected");
       // 重新订阅
-      for (const symbol of this.handlers.keys()) {
+      for (const symbol of Array.from(this.handlers.keys())) {
         this.ws?.send(JSON.stringify({ action: "subscribe", symbol }));
       }
     };
