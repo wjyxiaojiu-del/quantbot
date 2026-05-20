@@ -1,7 +1,7 @@
 """
 交易引擎 — 模拟交易核心逻辑
 """
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, Dict, List, Any
 from sqlalchemy.orm import Session
 import logging
@@ -13,10 +13,17 @@ logger = logging.getLogger(__name__)
 
 # A 股交易规则
 MIN_LOT = 100
-COMMISSION_RATE = 0.0003       # 万三佣金
-MIN_COMMISSION = 5.0           # 最低 5 元
-STAMP_TAX_RATE = 0.001         # 卖出印花税千一
-PRICE_LIMIT_PCT = 0.10         # 涨跌停 10%
+COMMISSION_RATE = Decimal("0.0003")    # 万三佣金
+MIN_COMMISSION = Decimal("5.0")        # 最低 5 元
+STAMP_TAX_RATE = Decimal("0.001")      # 卖出印花税千一
+PRICE_LIMIT_PCT = Decimal("0.10")      # 涨跌停 10%
+
+
+def _to_decimal(value, precision: str = "0.0001") -> Decimal:
+    """将 float/int/str 转为 Decimal，统一精度"""
+    if isinstance(value, Decimal):
+        return value.quantize(Decimal(precision), rounding=ROUND_HALF_UP)
+    return Decimal(str(value)).quantize(Decimal(precision), rounding=ROUND_HALF_UP)
 
 
 class TradeEngine:
@@ -36,26 +43,28 @@ class TradeEngine:
             Position.portfolio_id == portfolio_id, Position.quantity > 0
         ).all()
 
-        market_value = sum(float(p.avg_cost) * p.quantity for p in positions)
-        total_equity = float(portfolio.cash) + market_value
-        total_return = (total_equity - float(portfolio.initial_cash)) / float(portfolio.initial_cash) * 100
+        cash = _to_decimal(portfolio.cash, "0.01")
+        initial_cash = _to_decimal(portfolio.initial_cash, "0.01")
+        market_value = sum(_to_decimal(p.avg_cost, "0.01") * p.quantity for p in positions)
+        total_equity = cash + market_value
+        total_return = (total_equity - initial_cash) / initial_cash * 100 if initial_cash else Decimal("0")
 
         return {
             "id": str(portfolio.id),
             "name": portfolio.name,
-            "initial_cash": float(portfolio.initial_cash),
-            "cash": float(portfolio.cash),
-            "market_value": round(market_value, 2),
-            "total_equity": round(total_equity, 2),
-            "total_return_pct": round(total_return, 2),
+            "initial_cash": float(initial_cash),
+            "cash": float(cash),
+            "market_value": float(market_value),
+            "total_equity": float(total_equity),
+            "total_return_pct": float(total_return.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
             "position_count": len(positions),
             "positions": [
                 {
                     "id": str(p.id),
                     "symbol": p.symbol,
                     "quantity": p.quantity,
-                    "avg_cost": float(p.avg_cost),
-                    "market_value": round(float(p.avg_cost) * p.quantity, 2),
+                    "avg_cost": float(_to_decimal(p.avg_cost)),
+                    "market_value": float(_to_decimal(p.avg_cost, "0.01") * p.quantity),
                 }
                 for p in positions
             ],
@@ -72,27 +81,30 @@ class TradeEngine:
         if portfolio.status != "active":
             return {"success": False, "error": "组合已关闭"}
 
+        price_d = _to_decimal(price)
+        cash_d = _to_decimal(portfolio.cash)
+
         # 风控校验
         positions = self.db.query(Position).filter(Position.portfolio_id == portfolio_id).all()
         pos_dict = {
-            p.symbol: {"quantity": p.quantity, "market_value": float(p.avg_cost) * p.quantity}
+            p.symbol: {"quantity": p.quantity, "market_value": float(_to_decimal(p.avg_cost, "0.01") * p.quantity)}
             for p in positions
         }
-        total_equity = float(portfolio.cash) + sum(v["market_value"] for v in pos_dict.values())
+        total_equity = float(cash_d) + sum(v["market_value"] for v in pos_dict.values())
 
         valid, msg = self.risk.validate_order(
             side=side, symbol=symbol, price=price, quantity=quantity,
-            cash=float(portfolio.cash), positions=pos_dict, total_equity=total_equity
+            cash=float(cash_d), positions=pos_dict, total_equity=total_equity
         )
         if not valid:
             return {"success": False, "error": msg}
 
-        amount = price * quantity
+        amount = price_d * quantity
         commission = max(amount * COMMISSION_RATE, MIN_COMMISSION)
 
         if side == "buy":
             total_cost = amount + commission
-            portfolio.cash = float(portfolio.cash) - total_cost
+            portfolio.cash = cash_d - total_cost
 
             position = self.db.query(Position).filter(
                 Position.portfolio_id == portfolio_id, Position.symbol == symbol
@@ -101,7 +113,7 @@ class TradeEngine:
             if position:
                 total_qty = position.quantity + quantity
                 position.avg_cost = (
-                    float(position.avg_cost) * position.quantity + price * quantity
+                    _to_decimal(position.avg_cost) * position.quantity + price_d * quantity
                 ) / total_qty
                 position.quantity = total_qty
             else:
@@ -114,7 +126,7 @@ class TradeEngine:
             order = Order(
                 portfolio_id=portfolio_id, symbol=symbol,
                 side="buy", price=price, quantity=quantity,
-                amount=amount, commission=commission, status="filled"
+                amount=float(amount), commission=float(commission), status="filled"
             )
 
         elif side == "sell":
@@ -126,7 +138,7 @@ class TradeEngine:
 
             stamp_tax = amount * STAMP_TAX_RATE
             total_income = amount - commission - stamp_tax
-            portfolio.cash = float(portfolio.cash) + total_income
+            portfolio.cash = cash_d + total_income
 
             position.quantity -= quantity
             if position.quantity == 0:
@@ -135,7 +147,7 @@ class TradeEngine:
             order = Order(
                 portfolio_id=portfolio_id, symbol=symbol,
                 side="sell", price=price, quantity=quantity,
-                amount=amount, commission=commission + stamp_tax, status="filled"
+                amount=float(amount), commission=float(commission + stamp_tax), status="filled"
             )
         else:
             return {"success": False, "error": "side 必须是 buy 或 sell"}
@@ -151,8 +163,8 @@ class TradeEngine:
             "symbol": symbol,
             "price": price,
             "quantity": quantity,
-            "amount": round(amount, 2),
-            "commission": round(commission, 2),
+            "amount": float(amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+            "commission": float(commission.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
         }
 
     def get_order_history(
@@ -171,10 +183,10 @@ class TradeEngine:
                     "id": str(o.id),
                     "symbol": o.symbol,
                     "side": o.side,
-                    "price": float(o.price),
+                    "price": float(_to_decimal(o.price)),
                     "quantity": o.quantity,
-                    "amount": float(o.amount),
-                    "commission": float(o.commission),
+                    "amount": float(_to_decimal(o.amount, "0.01")),
+                    "commission": float(_to_decimal(o.commission, "0.01")),
                     "status": o.status,
                     "created_at": str(o.created_at),
                 }
@@ -193,19 +205,18 @@ class TradeEngine:
         if not position:
             return None
 
-        avg_cost = float(position.avg_cost)
+        avg_cost = _to_decimal(position.avg_cost)
         quantity = position.quantity
         market_value = avg_cost * quantity
 
-        # 计算止损/止盈价
-        stop_loss_price = self.risk.get_stop_loss_price(avg_cost)
-        take_profit_price = self.risk.get_take_profit_price(avg_cost)
+        stop_loss_price = self.risk.get_stop_loss_price(float(avg_cost))
+        take_profit_price = self.risk.get_take_profit_price(float(avg_cost))
 
         return {
             "symbol": symbol,
             "quantity": quantity,
-            "avg_cost": avg_cost,
-            "market_value": round(market_value, 2),
+            "avg_cost": float(avg_cost),
+            "market_value": float(market_value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
             "stop_loss_price": round(stop_loss_price, 2),
             "take_profit_price": round(take_profit_price, 2),
         }
