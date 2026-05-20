@@ -5,6 +5,8 @@ from uuid import UUID
 from datetime import date
 
 from app.core.database import get_db
+from app.core.auth import get_current_user
+from app.models.user import User
 from app.models.strategy import Strategy
 from app.models.kline import StockDailyKline
 from app.schemas.strategy import StrategyCreate, StrategyUpdate, StrategyOut, StrategyBrief
@@ -38,7 +40,7 @@ async def get_strategy(strategy_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=StrategyOut, status_code=201)
-async def create_strategy(data: StrategyCreate, db: Session = Depends(get_db)):
+async def create_strategy(data: StrategyCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     existing = db.query(Strategy).filter(Strategy.name == data.name).first()
     if existing:
         raise HTTPException(status_code=409, detail="策略名称已存在")
@@ -50,7 +52,7 @@ async def create_strategy(data: StrategyCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{strategy_id}", response_model=StrategyOut)
-async def update_strategy(strategy_id: UUID, data: StrategyUpdate, db: Session = Depends(get_db)):
+async def update_strategy(strategy_id: UUID, data: StrategyUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     strategy = db.query(Strategy).filter(Strategy.id == strategy_id).first()
     if not strategy:
         raise HTTPException(status_code=404, detail="策略不存在")
@@ -63,7 +65,7 @@ async def update_strategy(strategy_id: UUID, data: StrategyUpdate, db: Session =
 
 
 @router.delete("/{strategy_id}", status_code=204)
-async def delete_strategy(strategy_id: UUID, db: Session = Depends(get_db)):
+async def delete_strategy(strategy_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     strategy = db.query(Strategy).filter(Strategy.id == strategy_id).first()
     if not strategy:
         raise HTTPException(status_code=404, detail="策略不存在")
@@ -78,6 +80,7 @@ async def execute_strategy(
     period: str = Query("daily"),
     days: int = Query(250, ge=30, le=2000, description="回看天数"),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """对指定股票执行策略，生成信号"""
     strategy = db.query(Strategy).filter(Strategy.id == strategy_id).first()
@@ -113,7 +116,7 @@ async def execute_strategy(
 
 
 @router.post("/validate")
-async def validate_strategy_code(data: dict):
+async def validate_strategy_code(data: dict, user: User = Depends(get_current_user)):
     """验证策略代码是否合法"""
     code = data.get("code", "")
     valid, msg = StrategyExecutor.validate_code(code)
@@ -121,7 +124,7 @@ async def validate_strategy_code(data: dict):
 
 
 @router.post("/optimize")
-async def optimize_strategy_params(data: dict, db: Session = Depends(get_db)):
+async def optimize_strategy_params(data: dict, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """网格搜索最优策略参数
     请求体：
     {

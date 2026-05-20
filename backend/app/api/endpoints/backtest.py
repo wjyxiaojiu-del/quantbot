@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 
 from app.core.database import get_db
+from app.core.auth import get_current_user
+from app.models.user import User
 from app.models.kline import StockDailyKline
 from app.models.backtest import BacktestResult
 from app.schemas.backtest import BacktestRequest, BacktestResultOut
@@ -60,7 +62,7 @@ def _load_kline_df(db: Session, symbol: str, start_date, end_date) -> pd.DataFra
 
 
 @router.post("/run", response_model=BacktestResultOut)
-async def run_backtest(req: BacktestRequest, db: Session = Depends(get_db)):
+async def run_backtest(req: BacktestRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """执行回测（支持多股票 + 基准对比）"""
     kline_dict = {}
     for symbol in req.symbols:

@@ -3,9 +3,11 @@ import Home from "../page";
 
 // Mock next/link
 jest.mock("next/link", () => {
-  return ({ children, href }: { children: React.ReactNode; href: string }) => (
+  const MockLink = ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>
   );
+  MockLink.displayName = "MockLink";
+  return MockLink;
 });
 
 // Mock api modules
@@ -15,8 +17,8 @@ jest.mock("@/lib/api", () => ({
 }));
 
 import { dashboardApi, marketApi } from "@/lib/api";
-const mockedDashboard = dashboardApi as jest.Mocked<typeof dashboardApi>;
-const mockedMarket = marketApi as jest.Mocked<typeof marketApi>;
+const mockedDashboard = dashboardApi as any;
+const mockedMarket = marketApi as any;
 
 const mockDashboardData = {
   data: {

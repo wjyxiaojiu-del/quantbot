@@ -1,5 +1,6 @@
 import pytest
 import os
+import uuid
 from unittest.mock import patch
 
 
@@ -31,17 +32,12 @@ def setup_test_env(tmp_path_factory):
         database.Base.metadata.create_all(bind=database.engine)
 
         # 让 get_data_source_for_symbol 在测试中也使用 mock
-        from app.services.data import get_data_source as _real_get_ds
         from app.services.data import mock_adapter
         _mock_ds = mock_adapter.MockDataSource()
 
         import app.services.data as _ds_module
         _original_get_ds_for_symbol = _ds_module.get_data_source_for_symbol
         _ds_module.get_data_source_for_symbol = lambda symbol: _mock_ds
-
-        # 同时 patch backtest 端点中直接导入的版本
-        import app.api.endpoints.backtest as _bt_module
-        _bt_module_get_ds = _bt_module.__dict__.get("get_data_source_for_symbol")
 
         yield
 

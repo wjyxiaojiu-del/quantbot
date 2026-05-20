@@ -13,6 +13,7 @@ from app.models.user import User
 
 settings = get_settings()
 security = HTTPBearer()
+security_optional = HTTPBearer(auto_error=False)
 
 ALGORITHM = "HS256"
 
@@ -34,11 +35,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db),
-) -> User:
-    token = credentials.credentials
+def _decode_user(token: str, db: Session) -> User:
+    """从 JWT token 解码并返回用户"""
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
@@ -51,3 +49,24 @@ def get_current_user(
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在或已禁用")
     return user
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+) -> User:
+    """强制认证：无 token 时返回 401"""
+    return _decode_user(credentials.credentials, db)
+
+
+def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional),
+    db: Session = Depends(get_db),
+) -> Optional[User]:
+    """可选认证：无 token 时返回 None（用于公开读端点的用户关联）"""
+    if credentials is None:
+        return None
+    try:
+        return _decode_user(credentials.credentials, db)
+    except HTTPException:
+        return None

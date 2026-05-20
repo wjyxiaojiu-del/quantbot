@@ -9,9 +9,11 @@ jest.mock("next/navigation", () => ({
 
 // Mock next/link
 jest.mock("next/link", () => {
-  return ({ children, href }: { children: React.ReactNode; href: string }) => (
+  const MockLink = ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>
   );
+  MockLink.displayName = "MockLink";
+  return MockLink;
 });
 
 // Mock api
@@ -23,7 +25,7 @@ jest.mock("@/lib/api", () => ({
 }));
 
 import api from "@/lib/api";
-const mockedApi = api as jest.Mocked<typeof api>;
+const mockedApi = api as any;
 
 describe("LoginPage", () => {
   beforeEach(() => {

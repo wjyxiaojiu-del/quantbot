@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.core.database import get_db
+from app.core.auth import get_current_user
+from app.models.user import User
 from app.models.stock import Stock
 from app.models.kline import StockDailyKline
 from app.models.strategy import Strategy
@@ -13,7 +15,7 @@ router = APIRouter()
 
 
 @router.get("/")
-async def get_dashboard(db: Session = Depends(get_db)):
+async def get_dashboard(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """首页 Dashboard 数据聚合"""
     # 股票统计
     stock_count = db.query(Stock).count()
