@@ -28,6 +28,7 @@
 ```bash
 # 后端
 cd backend
+cp .env.example .env  # 按需修改
 pip install -r requirements.txt
 python -m uvicorn app.main:app --reload --port 8000
 
@@ -42,6 +43,7 @@ npm run dev
 ### Docker 部署
 
 ```bash
+cp backend/.env.example backend/.env  # 按需修改 SECRET_KEY 等
 docker-compose up -d
 ```
 
@@ -139,4 +141,4 @@ cd backend
 python -m pytest tests/ -v
 ```
 
-37 个测试覆盖：风控引擎、回测引擎、API 端点。
+38 个测试覆盖：风控引擎、回测引擎、API 端点、认证保护。
