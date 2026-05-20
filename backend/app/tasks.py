@@ -44,9 +44,7 @@ def sync_stock_kline(self, symbol: str, period: str = "daily"):
     db = SessionLocal()
     try:
         manager = DataSyncManager(db)
-        result = asyncio.get_event_loop().run_until_complete(
-            manager.sync_kline(symbol, period)
-        )
+        result = asyncio.run(manager.sync_kline(symbol, period))
         return result
     finally:
         db.close()
@@ -86,7 +84,7 @@ def sync_stock_list_task():
     db = SessionLocal()
     try:
         manager = DataSyncManager(db)
-        count = asyncio.get_event_loop().run_until_complete(manager.sync_stock_list())
+        count = asyncio.run(manager.sync_stock_list())
         return {"new_stocks": count}
     finally:
         db.close()

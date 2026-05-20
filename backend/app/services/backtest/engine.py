@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 import logging
@@ -13,15 +13,35 @@ from app.services.strategy.sandbox import safe_exec_strategy
 logger = logging.getLogger(__name__)
 
 
+def _d(value, precision: str = "0.0001") -> Decimal:
+    """将 float/int/str 转为 Decimal，统一精度"""
+    if isinstance(value, Decimal):
+        return value.quantize(Decimal(precision), rounding=ROUND_HALF_UP)
+    return Decimal(str(value)).quantize(Decimal(precision), rounding=ROUND_HALF_UP)
+
+
+def _f(value) -> float:
+    """Decimal → float，用于输出边界"""
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
+# A 股交易费率
+_COMMISSION_RATE = Decimal("0.0003")
+_MIN_COMMISSION = Decimal("5.0")
+_STAMP_TAX_RATE = Decimal("0.001")
+
+
 @dataclass
 class Position:
     symbol: str
     quantity: int = 0
-    avg_cost: float = 0.0
-    market_value: float = 0.0
+    avg_cost: Decimal = Decimal("0")
+    market_value: Decimal = Decimal("0")
 
     @property
-    def unrealized_pnl(self) -> float:
+    def unrealized_pnl(self) -> Decimal:
         return self.market_value - self.avg_cost * self.quantity
 
 
@@ -29,39 +49,41 @@ class Position:
 class Trade:
     symbol: str
     side: str  # "buy" / "sell"
-    price: float
+    price: Decimal
     quantity: int
-    amount: float
-    commission: float
+    amount: Decimal
+    commission: Decimal
     trade_date: str
     reason: str = ""
 
 
 @dataclass
 class Portfolio:
-    cash: float = 1_000_000.0
-    initial_cash: float = 1_000_000.0
+    cash: Decimal = Decimal("1000000")
+    initial_cash: Decimal = Decimal("1000000")
     positions: Dict[str, Position] = field(default_factory=dict)
     trades: List[Trade] = field(default_factory=list)
     equity_curve: List[dict] = field(default_factory=list)
-    daily_pnl: List[float] = field(default_factory=list)
+    daily_pnl: List[Decimal] = field(default_factory=list)
 
     @property
-    def total_market_value(self) -> float:
+    def total_market_value(self) -> Decimal:
+        if not self.positions:
+            return Decimal("0")
         return sum(p.market_value for p in self.positions.values())
 
     @property
-    def total_equity(self) -> float:
+    def total_equity(self) -> Decimal:
         return self.cash + self.total_market_value
 
-    def update_market_price(self, symbol: str, price: float):
+    def update_market_price(self, symbol: str, price: Decimal):
         if symbol in self.positions:
             pos = self.positions[symbol]
             pos.market_value = pos.quantity * price
 
-    def buy(self, symbol: str, price: float, quantity: int, trade_date: str, commission_rate: float = 0.0003, reason: str = "") -> Optional[Trade]:
+    def buy(self, symbol: str, price: Decimal, quantity: int, trade_date: str, commission_rate: Decimal = _COMMISSION_RATE, reason: str = "") -> Optional[Trade]:
         amount = price * quantity
-        commission = max(amount * commission_rate, 5.0)  # 最低5元
+        commission = max(amount * commission_rate, _MIN_COMMISSION)
         total_cost = amount + commission
         if total_cost > self.cash:
             return None
@@ -72,7 +94,7 @@ class Portfolio:
         if symbol in self.positions:
             pos = self.positions[symbol]
             total_qty = pos.quantity + quantity
-            pos.avg_cost = (pos.avg_cost * pos.quantity + price * quantity) / total_qty
+            pos.avg_cost = _d((pos.avg_cost * pos.quantity + price * quantity) / total_qty)
             pos.quantity = total_qty
             pos.market_value = total_qty * price
         else:
@@ -89,7 +111,7 @@ class Portfolio:
         self.trades.append(trade)
         return trade
 
-    def sell(self, symbol: str, price: float, quantity: int, trade_date: str, commission_rate: float = 0.0003, reason: str = "") -> Optional[Trade]:
+    def sell(self, symbol: str, price: Decimal, quantity: int, trade_date: str, commission_rate: Decimal = _COMMISSION_RATE, reason: str = "") -> Optional[Trade]:
         if symbol not in self.positions:
             return None
         pos = self.positions[symbol]
@@ -99,9 +121,8 @@ class Portfolio:
             return None
 
         amount = price * quantity
-        # 卖出印花税 0.1%
-        stamp_tax = amount * 0.001
-        commission = max(amount * commission_rate, 5.0)
+        stamp_tax = amount * _STAMP_TAX_RATE
+        commission = max(amount * commission_rate, _MIN_COMMISSION)
         total_income = amount - commission - stamp_tax
 
         self.cash += total_income
@@ -123,9 +144,9 @@ class Portfolio:
     def snapshot(self, trade_date: str):
         self.equity_curve.append({
             "date": trade_date,
-            "cash": round(self.cash, 2),
-            "market_value": round(self.total_market_value, 2),
-            "equity": round(self.total_equity, 2),
+            "cash": _f(self.cash.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+            "market_value": _f(self.total_market_value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+            "equity": _f(self.total_equity.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
         })
 
 
@@ -139,12 +160,12 @@ class BacktestEngine:
         slippage: float = 0.001,  # 0.1% 滑点
         risk_config: Optional[RiskConfig] = None,
     ):
-        self.initial_cash = initial_cash
-        self.commission_rate = commission_rate
-        self.slippage = slippage
-        self.portfolio = Portfolio(cash=initial_cash, initial_cash=initial_cash)
+        self.initial_cash = _d(initial_cash, "0.01")
+        self.commission_rate = _d(commission_rate)
+        self.slippage = _d(slippage)
+        self.portfolio = Portfolio(cash=self.initial_cash, initial_cash=self.initial_cash)
         self.risk = RiskManager(risk_config)
-        self.peak_equity = initial_cash
+        self.peak_equity = self.initial_cash
         self._halted = False
 
     def run(self, strategy_code: str, kline_data: pd.DataFrame, params: Dict[str, Any] = None, benchmark_kline: pd.DataFrame = None) -> dict:
@@ -163,7 +184,7 @@ class BacktestEngine:
         benchmark_map = {}
         if benchmark_kline is not None and not benchmark_kline.empty:
             for _, row in benchmark_kline.iterrows():
-                benchmark_map[str(row["trade_date"])] = float(row["close"])
+                benchmark_map[str(row["trade_date"])] = _d(row["close"])
 
         try:
             # 使用安全沙箱执行策略代码
@@ -183,8 +204,8 @@ class BacktestEngine:
         for idx in range(len(rows)):
             i, row = rows[idx]
             trade_date = str(row.get("trade_date", i))
-            close_price = float(row["close"])
-            open_price = float(row.get("open", close_price))  # 用开盘价成交
+            close_price = _d(row["close"])
+            open_price = _d(row.get("open", row["close"]))  # 用开盘价成交
             signal = int(row.get("signal", 0))
 
             # 更新持仓市值（用当日收盘价）
@@ -194,39 +215,42 @@ class BacktestEngine:
             if self._halted:
                 continue
 
-            current_equity_val = self.portfolio.total_equity
-            if self.risk.check_max_drawdown(self.peak_equity, current_equity_val):
+            current_equity_val = _f(self.portfolio.total_equity)
+            if self.risk.check_max_drawdown(_f(self.peak_equity), current_equity_val):
                 self._halted = True
                 # 清仓（用当日开盘价）
                 for sym in list(self.portfolio.positions.keys()):
                     if sym in self.portfolio.positions:
                         pos = self.portfolio.positions[sym]
-                        sell_price = open_price * (1 - self.slippage)
+                        sell_price = open_price * (Decimal("1") - self.slippage)
                         self.portfolio.sell(sym, sell_price, pos.quantity, trade_date, self.commission_rate, reason="回撤熔断")
                 continue
 
             # 止损/止盈检查（用当日开盘价触发）
             if symbol in self.portfolio.positions:
                 pos = self.portfolio.positions[symbol]
-                if self.risk.check_stop_loss(pos.avg_cost, open_price):
-                    sell_price = open_price * (1 - self.slippage)
+                if self.risk.check_stop_loss(_f(pos.avg_cost), _f(open_price)):
+                    sell_price = open_price * (Decimal("1") - self.slippage)
                     self.portfolio.sell(symbol, sell_price, pos.quantity, trade_date, self.commission_rate, reason="止损")
                     continue
-                if self.risk.check_take_profit(pos.avg_cost, open_price):
-                    sell_price = open_price * (1 - self.slippage)
+                if self.risk.check_take_profit(_f(pos.avg_cost), _f(open_price)):
+                    sell_price = open_price * (Decimal("1") - self.slippage)
                     self.portfolio.sell(symbol, sell_price, pos.quantity, trade_date, self.commission_rate, reason="止盈")
                     continue
 
             # 执行前一日的待定信号（T 日信号在 T+1 日开盘成交）
             if pending_signal is not None:
-                exec_price = open_price * (1 + self.slippage) if pending_signal == 1 else open_price * (1 - self.slippage)
+                if pending_signal == 1:
+                    exec_price = open_price * (Decimal("1") + self.slippage)
+                else:
+                    exec_price = open_price * (Decimal("1") - self.slippage)
 
                 if pending_signal == 1:  # 买入
-                    current_pos_value = 0
+                    current_pos_value = Decimal("0")
                     if symbol in self.portfolio.positions:
                         current_pos_value = self.portfolio.positions[symbol].market_value
                     quantity = self.risk.calc_max_buy_quantity(
-                        self.portfolio.cash, exec_price, current_pos_value, self.portfolio.total_equity
+                        _f(self.portfolio.cash), _f(exec_price), _f(current_pos_value), _f(self.portfolio.total_equity)
                     )
                     if quantity >= 100:
                         self.portfolio.buy(symbol, exec_price, quantity, trade_date, self.commission_rate)
@@ -259,13 +283,14 @@ class BacktestEngine:
         if not equity_curve:
             return {"status": "completed", "metrics": {}, "equity_curve": [], "trades": []}
 
-        equities = [e["equity"] for e in equity_curve]
-        initial = self.portfolio.initial_cash
+        equities = [e["equity"] for e in equity_curve]  # already float from snapshot
+        initial = _f(self.portfolio.initial_cash)
         final = equities[-1]
 
         # 收益率序列：daily_pnl[i] / equities[i-1]，第一天用 initial
         equity_prev = [initial] + equities[:-1]
-        returns = pd.Series(self.portfolio.daily_pnl) / pd.Series(equity_prev)
+        daily_pnl_float = [_f(v) for v in self.portfolio.daily_pnl]
+        returns = pd.Series(daily_pnl_float) / pd.Series(equity_prev)
         returns = returns.replace([np.inf, -np.inf], 0)
 
         # 最大回撤
@@ -278,8 +303,8 @@ class BacktestEngine:
         trades = self.portfolio.trades
         sell_trades = [t for t in trades if t.side == "sell"]
         win_count = 0
-        total_profit = 0
-        total_loss = 0
+        total_profit = Decimal("0")
+        total_loss = Decimal("0")
 
         # 简单配对计算盈亏
         buy_stack = []
@@ -297,11 +322,12 @@ class BacktestEngine:
 
         trade_count = len(sell_trades)
         win_rate = win_count / trade_count if trade_count > 0 else 0
-        profit_loss_ratio = total_profit / total_loss if total_loss > 0 else float("inf")
+        total_loss_f = _f(total_loss)
+        profit_loss_ratio = _f(total_profit) / total_loss_f if total_loss_f > 0 else float("inf")
 
         # 年化收益
         days = len(equities)
-        total_return = (final - initial) / initial
+        total_return = (final - initial) / initial if initial else 0
         annual_return = (1 + total_return) ** (252 / max(days, 1)) - 1 if days > 0 else 0
 
         # 夏普比率（假设无风险利率 3%）
@@ -330,7 +356,7 @@ class BacktestEngine:
             "stop_loss_count": stop_loss_count,
             "take_profit_count": take_profit_count,
             "halt_count": halt_count,
-            "initial_cash": self.portfolio.initial_cash,
+            "initial_cash": initial,
             "final_equity": round(final, 2),
         }
 
@@ -338,14 +364,14 @@ class BacktestEngine:
         benchmark_metrics = {}
         if benchmark_map and len(benchmark_map) > 1:
             bm_dates = sorted(benchmark_map.keys())
-            bm_first = benchmark_map[bm_dates[0]]
-            bm_last = benchmark_map[bm_dates[-1]]
-            bm_return = (bm_last - bm_first) / bm_first
+            bm_first = _f(benchmark_map[bm_dates[0]])
+            bm_last = _f(benchmark_map[bm_dates[-1]])
+            bm_return = (bm_last - bm_first) / bm_first if bm_first else 0
             bm_days = len(bm_dates)
             bm_annual = (1 + bm_return) ** (252 / max(bm_days, 1)) - 1 if bm_days > 0 else 0
 
             # 基准最大回撤
-            bm_prices = [benchmark_map[d] for d in bm_dates]
+            bm_prices = [_f(benchmark_map[d]) for d in bm_dates]
             bm_series = pd.Series(bm_prices)
             bm_cummax = bm_series.cummax()
             bm_dd = (bm_series - bm_cummax) / bm_cummax
@@ -364,9 +390,12 @@ class BacktestEngine:
 
         trades_out = [
             {
-                "symbol": t.symbol, "side": t.side, "price": round(t.price, 4),
-                "quantity": t.quantity, "amount": round(t.amount, 2),
-                "commission": round(t.commission, 2), "trade_date": t.trade_date,
+                "symbol": t.symbol, "side": t.side,
+                "price": _f(t.price.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
+                "quantity": t.quantity,
+                "amount": _f(t.amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+                "commission": _f(t.commission.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+                "trade_date": t.trade_date,
                 "reason": t.reason,
             }
             for t in trades
@@ -376,9 +405,9 @@ class BacktestEngine:
         benchmark_curve = []
         if benchmark_map and len(benchmark_map) > 1:
             bm_dates = sorted(benchmark_map.keys())
-            bm_first = benchmark_map[bm_dates[0]]
+            bm_first = _f(benchmark_map[bm_dates[0]])
             for d in bm_dates:
-                bm_curve_val = benchmark_map[d] / bm_first * self.portfolio.initial_cash
+                bm_curve_val = _f(benchmark_map[d]) / bm_first * initial
                 benchmark_curve.append({
                     "date": d,
                     "equity": round(bm_curve_val, 2),
@@ -458,19 +487,19 @@ class BacktestEngine:
             # 更新所有持仓市值
             for symbol in list(self.portfolio.positions.keys()):
                 if symbol in indexed and trade_date in indexed[symbol]:
-                    price = float(indexed[symbol][trade_date]["close"])
+                    price = _d(indexed[symbol][trade_date]["close"])
                     self.portfolio.update_market_price(symbol, price)
 
             # 风控检查：最大回撤熔断
             if self._halted:
                 continue
 
-            current_equity_val = self.portfolio.total_equity
-            if self.risk.check_max_drawdown(self.peak_equity, current_equity_val):
+            current_equity_val = _f(self.portfolio.total_equity)
+            if self.risk.check_max_drawdown(_f(self.peak_equity), current_equity_val):
                 self._halted = True
                 for sym in list(self.portfolio.positions.keys()):
                     if sym in indexed and trade_date in indexed[sym]:
-                        price = float(indexed[sym][trade_date]["close"]) * (1 - self.slippage)
+                        price = _d(indexed[sym][trade_date]["close"]) * (Decimal("1") - self.slippage)
                         pos = self.portfolio.positions.get(sym)
                         if pos:
                             self.portfolio.sell(sym, price, pos.quantity, trade_date, self.commission_rate, reason="回撤熔断")
@@ -481,28 +510,28 @@ class BacktestEngine:
                 if trade_date not in date_map:
                     continue
                 row = date_map[trade_date]
-                close_price = float(row["close"])
+                close_price = _d(row["close"])
                 signal = int(row.get("signal", 0))
 
                 # 止损/止盈检查
                 if symbol in self.portfolio.positions:
                     pos = self.portfolio.positions[symbol]
-                    if self.risk.check_stop_loss(pos.avg_cost, close_price):
-                        sell_price = close_price * (1 - self.slippage)
+                    if self.risk.check_stop_loss(_f(pos.avg_cost), _f(close_price)):
+                        sell_price = close_price * (Decimal("1") - self.slippage)
                         self.portfolio.sell(symbol, sell_price, pos.quantity, trade_date, self.commission_rate, reason="止损")
                         continue
-                    if self.risk.check_take_profit(pos.avg_cost, close_price):
-                        sell_price = close_price * (1 - self.slippage)
+                    if self.risk.check_take_profit(_f(pos.avg_cost), _f(close_price)):
+                        sell_price = close_price * (Decimal("1") - self.slippage)
                         self.portfolio.sell(symbol, sell_price, pos.quantity, trade_date, self.commission_rate, reason="止盈")
                         continue
 
                 if signal == 1:
-                    buy_price = close_price * (1 + self.slippage)
-                    current_pos_value = 0
+                    buy_price = close_price * (Decimal("1") + self.slippage)
+                    current_pos_value = Decimal("0")
                     if symbol in self.portfolio.positions:
                         current_pos_value = self.portfolio.positions[symbol].market_value
                     quantity = self.risk.calc_max_buy_quantity(
-                        self.portfolio.cash, buy_price, current_pos_value, self.portfolio.total_equity
+                        _f(self.portfolio.cash), _f(buy_price), _f(current_pos_value), _f(self.portfolio.total_equity)
                     )
                     if quantity >= 100:
                         self.portfolio.buy(symbol, buy_price, quantity, trade_date, self.commission_rate)
@@ -510,7 +539,7 @@ class BacktestEngine:
                 elif signal == -1:
                     if symbol in self.portfolio.positions:
                         pos = self.portfolio.positions[symbol]
-                        sell_price = close_price * (1 - self.slippage)
+                        sell_price = close_price * (Decimal("1") - self.slippage)
                         self.portfolio.sell(symbol, sell_price, pos.quantity, trade_date, self.commission_rate)
 
             # 更新峰值
