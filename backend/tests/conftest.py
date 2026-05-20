@@ -1,5 +1,6 @@
 import pytest
 import os
+import uuid
 from unittest.mock import patch
 
 
@@ -16,21 +17,18 @@ def setup_test_env(tmp_path_factory):
         "SECRET_KEY": "test-secret-key-for-testing-only",
         "DEBUG": "true",
     }):
-        # 清除 lru_cache，让 Settings 重新读取环境变量
         from app.core.config import get_settings
         get_settings.cache_clear()
 
-        # 重新创建数据库引擎
         from app.core import database
         from sqlalchemy import create_engine
         database.engine = create_engine(test_db_url, pool_pre_ping=True)
         database.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=database.engine)
 
-        # 创建表
         from app.models import user, strategy, trade, backtest, kline
         database.Base.metadata.create_all(bind=database.engine)
 
-        # 让 get_data_source_for_symbol 在测试中也使用 mock
+        # 让 get_data_source_for_symbol 在测试中使用 mock
         from app.services.data import mock_adapter
         _mock_ds = mock_adapter.MockDataSource()
 
