@@ -1,6 +1,5 @@
 import pytest
 import os
-import uuid
 from unittest.mock import patch
 
 

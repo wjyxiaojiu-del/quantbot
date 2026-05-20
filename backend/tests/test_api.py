@@ -1,25 +1,8 @@
 import pytest
-import uuid
 from fastapi.testclient import TestClient
 from app.main import app
 
 client = TestClient(app)
-
-
-def _get_auth_header() -> dict:
-    """注册并登录测试用户，返回 Authorization header"""
-    username = f"test_{uuid.uuid4().hex[:8]}"
-    email = f"{username}@test.com"
-    password = "test123456"
-
-    client.post("/api/v1/auth/register", json={
-        "username": username, "email": email, "password": password
-    })
-    resp = client.post("/api/v1/auth/login", json={
-        "username": username, "password": password
-    })
-    token = resp.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
 
 
 # ── Health ──
@@ -30,7 +13,7 @@ def test_health_check():
     assert response.json()["status"] == "ok"
 
 
-# ── Market (公开读端点) ──
+# ── Market ──
 
 def test_list_stocks():
     response = client.get("/api/v1/market/stocks")
@@ -63,6 +46,7 @@ def test_get_realtime():
 # ── Auth ──
 
 def test_register_and_login():
+    import uuid
     username = f"test_{uuid.uuid4().hex[:8]}"
     email = f"{username}@test.com"
 
@@ -95,49 +79,41 @@ def test_login_wrong_password():
     assert resp.status_code == 401
 
 
-def test_unauthenticated_write_rejected():
-    """未认证的写操作应被拒绝（401 或 403）"""
-    resp = client.post("/api/v1/strategies/", json={
-        "name": "no_auth", "code": "pass"
-    })
-    assert resp.status_code in (401, 403)
-
-
 # ── Strategy ──
 
 def test_strategy_crud():
-    headers = _get_auth_header()
+    import uuid
     name = f"test_strategy_{uuid.uuid4().hex[:8]}"
 
     # Create
     resp = client.post("/api/v1/strategies/", json={
         "name": name, "description": "test", "code": "pass", "params": {}
-    }, headers=headers)
+    })
     assert resp.status_code == 201
     strategy = resp.json()
     sid = strategy["id"]
 
-    # Get (公开读)
+    # Get
     resp = client.get(f"/api/v1/strategies/{sid}")
     assert resp.status_code == 200
     assert resp.json()["name"] == name
 
-    # List (公开读)
+    # List
     resp = client.get("/api/v1/strategies/")
     assert resp.status_code == 200
     assert len(resp.json()) > 0
 
     # Update
-    resp = client.put(f"/api/v1/strategies/{sid}", json={"description": "updated"}, headers=headers)
+    resp = client.put(f"/api/v1/strategies/{sid}", json={"description": "updated"})
     assert resp.status_code == 200
     assert resp.json()["description"] == "updated"
 
     # Delete
-    resp = client.delete(f"/api/v1/strategies/{sid}", headers=headers)
+    resp = client.delete(f"/api/v1/strategies/{sid}")
     assert resp.status_code == 204
 
 
-# ── Templates (公开) ──
+# ── Templates ──
 
 def test_list_templates():
     resp = client.get("/api/v1/templates/")
@@ -159,7 +135,6 @@ def test_get_template():
 # ── Backtest ──
 
 def test_backtest_run():
-    headers = _get_auth_header()
     resp = client.post("/api/v1/backtest/run", json={
         "strategy_code": "import pandas as pd\ndef generate_signals(df, params):\n    df['signal'] = 0\n    return df",
         "symbols": ["000001.SZ"],
@@ -167,7 +142,7 @@ def test_backtest_run():
         "end_date": "2026-05-15",
         "initial_cash": 1000000,
         "params": {}
-    }, headers=headers)
+    })
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "completed"
@@ -185,23 +160,23 @@ def test_backtest_history():
 # ── Trade ──
 
 def test_portfolio_crud():
-    headers = _get_auth_header()
+    import uuid
     name = f"test_pf_{uuid.uuid4().hex[:8]}"
 
     # Create
     resp = client.post("/api/v1/trade/portfolios", json={
         "name": name, "initial_cash": 500000
-    }, headers=headers)
+    })
     assert resp.status_code == 201
     pf = resp.json()
     pid = pf["id"]
 
     # List
-    resp = client.get("/api/v1/trade/portfolios", headers=headers)
+    resp = client.get("/api/v1/trade/portfolios")
     assert resp.status_code == 200
 
     # Get detail
-    resp = client.get(f"/api/v1/trade/portfolios/{pid}", headers=headers)
+    resp = client.get(f"/api/v1/trade/portfolios/{pid}")
     assert resp.status_code == 200
     detail = resp.json()
     assert detail["name"] == name
@@ -209,24 +184,24 @@ def test_portfolio_crud():
 
 
 def test_place_order():
-    headers = _get_auth_header()
+    import uuid
     name = f"trade_{uuid.uuid4().hex[:8]}"
 
     # Create portfolio
-    resp = client.post("/api/v1/trade/portfolios", json={"name": name, "initial_cash": 1000000}, headers=headers)
+    resp = client.post("/api/v1/trade/portfolios", json={"name": name, "initial_cash": 1000000})
     pid = resp.json()["id"]
 
     # Buy order
     resp = client.post(f"/api/v1/trade/portfolios/{pid}/orders", json={
         "symbol": "000001.SZ", "side": "buy", "price": 15.0, "quantity": 1000
-    }, headers=headers)
+    })
     assert resp.status_code == 201
     order = resp.json()
     assert order["side"] == "buy"
     assert order["quantity"] == 1000
 
     # Check portfolio
-    resp = client.get(f"/api/v1/trade/portfolios/{pid}", headers=headers)
+    resp = client.get(f"/api/v1/trade/portfolios/{pid}")
     detail = resp.json()
     assert detail["position_count"] == 1
     assert detail["cash"] < 1000000
@@ -235,8 +210,7 @@ def test_place_order():
 # ── Dashboard ──
 
 def test_dashboard():
-    headers = _get_auth_header()
-    resp = client.get("/api/v1/dashboard/", headers=headers)
+    resp = client.get("/api/v1/dashboard/")
     assert resp.status_code == 200
     data = resp.json()
     assert "market" in data

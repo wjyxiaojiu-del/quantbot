@@ -4,8 +4,6 @@ from typing import List, Optional
 from datetime import date
 
 from app.core.database import get_db
-from app.core.auth import get_current_user
-from app.models.user import User
 from app.services.data import get_data_source
 from app.services.data.sync_manager import DataSyncManager
 from app.schemas.market import StockOut, KLineOut, SyncRequest, SyncResponse
@@ -79,7 +77,7 @@ async def get_realtime_quote(symbol: str):
 
 
 @router.post("/sync", response_model=SyncResponse)
-async def sync_stock_data(request: SyncRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+async def sync_stock_data(request: SyncRequest, db: Session = Depends(get_db)):
     """手动触发数据同步"""
     manager = DataSyncManager(db)
     
@@ -106,7 +104,7 @@ async def sync_stock_data(request: SyncRequest, db: Session = Depends(get_db), u
 
 
 @router.post("/stocks/sync-all")
-async def sync_all_stocks(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+async def sync_all_stocks(db: Session = Depends(get_db)):
     """同步全市场股票列表"""
     manager = DataSyncManager(db)
     count = await manager.sync_stock_list()
