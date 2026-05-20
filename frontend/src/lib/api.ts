@@ -8,26 +8,6 @@ const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-// 自动附加 token
-api.interceptors.request.use((config) => {
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("token");
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-  }
-  return config;
-});
-
-// ── 认证 ──
-export const authApi = {
-  login: (data: { username: string; password: string }) =>
-    api.post("/auth/login", data),
-  register: (data: { username: string; email: string; password: string }) =>
-    api.post("/auth/register", data),
-  me: () => api.get("/auth/me"),
-};
-
 // ── 策略模板 ──
 export const templateApi = {
   list: () => api.get("/templates"),

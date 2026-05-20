@@ -15,24 +15,14 @@ interface DashboardData {
 export default function Home() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
   const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-    if (!token) {
+    dashboardApi.get().then((r) => { setData(r.data); setLoading(false); }).catch(() => {
       setLoading(false);
-      setError("unauthenticated");
-      return;
-    }
-    dashboardApi.get().then((r) => { setData(r.data); setLoading(false); }).catch((e) => {
-      setLoading(false);
-      if (e.response?.status === 401) {
-        setError("unauthenticated");
-      } else {
-        setError("network");
-      }
+      setError(true);
     });
   }, []);
 
@@ -64,8 +54,6 @@ export default function Home() {
             <Link href="/market" className="hover:text-blue-600 transition-colors">行情</Link>
             <Link href="/strategies" className="hover:text-blue-600 transition-colors">策略</Link>
             <Link href="/backtest" className="hover:text-blue-600 transition-colors">回测</Link>
-            <Link href="/trade" className="hover:text-blue-600 transition-colors">交易</Link>
-            <Link href="/login" className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-colors">登录</Link>
           </nav>
         </div>
       </header>
@@ -80,12 +68,7 @@ export default function Home() {
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin h-8 w-8 border-4 border-blue-600 border-t-transparent rounded-full" />
           </div>
-        ) : error === "unauthenticated" ? (
-          <div className="text-center py-16">
-            <p className="text-slate-500 mb-4">请先登录后查看 Dashboard</p>
-            <Link href="/login" className="px-4 py-2 bg-blue-600 text-white rounded-lg inline-block">去登录</Link>
-          </div>
-        ) : error === "network" ? (
+        ) : error ? (
           <div className="text-center py-16">
             <p className="text-slate-500 mb-4">加载失败，请检查后端是否运行</p>
             <button onClick={() => window.location.reload()} className="px-4 py-2 bg-blue-600 text-white rounded-lg">重试</button>
@@ -100,30 +83,7 @@ export default function Home() {
               <StatCard title="回测次数" value={String(data.backtest.total)} sub={data.backtest.best_return != null ? `最佳 ${data.backtest.best_return}%` : undefined} icon="backtest" />
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-              {/* 资产概览 */}
-              <div className="bg-white dark:bg-slate-900 rounded-xl border p-6">
-                <h3 className="font-semibold mb-4 text-slate-700 dark:text-slate-300">资产概览</h3>
-                <div className="space-y-3">
-                  <div className="flex justify-between"><span className="text-slate-500">组合数量</span><span className="font-medium">{data.portfolio.count}</span></div>
-                  <div className="flex justify-between"><span className="text-slate-500">总现金</span><span className="font-medium">{data.portfolio.total_cash.toLocaleString()}</span></div>
-                  <div className="flex justify-between"><span className="text-slate-500">总权益</span><span className="font-bold text-lg">{data.portfolio.total_equity.toLocaleString()}</span></div>
-                </div>
-                {data.portfolio.items.length > 0 && (
-                  <div className="mt-4 pt-4 border-t space-y-2">
-                    {data.portfolio.items.map((p) => (
-                      <div key={p.id} className="flex justify-between items-center text-sm">
-                        <span className="text-slate-600 dark:text-slate-400">{p.name}</span>
-                        <span className={p.return_pct >= 0 ? "text-red-600" : "text-green-600"}>
-                          {p.return_pct >= 0 ? "+" : ""}{p.return_pct}%
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <Link href="/trade" className="mt-4 block text-center text-sm text-blue-600 hover:underline">进入交易 →</Link>
-              </div>
-
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
               {/* 最近同步 */}
               <div className="bg-white dark:bg-slate-900 rounded-xl border p-6">
                 <h3 className="font-semibold mb-4 text-slate-700 dark:text-slate-300">最近同步</h3>
@@ -147,36 +107,27 @@ export default function Home() {
                 {syncMsg && <p className="mt-2 text-xs text-slate-500">{syncMsg}</p>}
               </div>
 
-              {/* 最近交易 */}
+              {/* 最近回测 */}
               <div className="bg-white dark:bg-slate-900 rounded-xl border p-6">
-                <h3 className="font-semibold mb-4 text-slate-700 dark:text-slate-300">最近交易</h3>
-                {data.recent_orders.length === 0 ? (
-                  <p className="text-slate-400 text-sm">暂无交易记录</p>
-                ) : (
-                  <div className="space-y-2">
-                    {data.recent_orders.slice(0, 5).map((o) => (
-                      <div key={o.id} className="flex justify-between items-center text-sm">
-                        <div className="flex items-center gap-2">
-                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${o.side === "buy" ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>
-                            {o.side === "buy" ? "买" : "卖"}
-                          </span>
-                          <span className="font-mono">{o.symbol}</span>
-                        </div>
-                        <span className="text-slate-500">{o.quantity}股 @{o.price}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <Link href="/trade" className="mt-4 block text-center text-sm text-blue-600 hover:underline">查看全部 →</Link>
+                <h3 className="font-semibold mb-4 text-slate-700 dark:text-slate-300">回测概览</h3>
+                <div className="space-y-3">
+                  <div className="flex justify-between"><span className="text-slate-500">总回测次数</span><span className="font-medium">{data.backtest.total}</span></div>
+                  {data.backtest.best_return != null && (
+                    <div className="flex justify-between"><span className="text-slate-500">最佳收益</span><span className="font-medium text-red-600">+{data.backtest.best_return}%</span></div>
+                  )}
+                  {data.backtest.best_name && (
+                    <div className="flex justify-between"><span className="text-slate-500">最佳策略</span><span className="font-medium">{data.backtest.best_name}</span></div>
+                  )}
+                </div>
+                <Link href="/backtest" className="mt-4 block text-center text-sm text-blue-600 hover:underline">去回测 →</Link>
               </div>
             </div>
 
             {/* 快速入口 */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <QuickLink href="/market" title="行情中心" desc="实时行情与 K 线" color="blue" />
               <QuickLink href="/strategies" title="策略管理" desc="编写与管理策略" color="green" />
               <QuickLink href="/backtest" title="策略回测" desc="历史回测验证" color="purple" />
-              <QuickLink href="/trade" title="模拟交易" desc="虚拟资金实战" color="orange" />
             </div>
           </>
         )}
