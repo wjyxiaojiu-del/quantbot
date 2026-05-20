@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { tradeApi } from "@/lib/api";
+import PnLChart from "@/components/trade/PnLChart";
 
 interface Portfolio {
   id: string;
@@ -193,6 +194,19 @@ export default function TradePage() {
                   </div>
                 </div>
               </div>
+
+              {/* 盈亏分析 */}
+              {portfolio.positions && portfolio.positions.length > 0 && (
+                <div className="bg-white dark:bg-slate-900 rounded-xl border p-4">
+                  <h3 className="font-bold mb-3">盈亏分析</h3>
+                  <PnLChart
+                    positions={portfolio.positions}
+                    initialCash={portfolio.initial_cash}
+                    currentCash={portfolio.cash}
+                    height={250}
+                  />
+                </div>
+              )}
 
               {/* 持仓 */}
               <div className="bg-white dark:bg-slate-900 rounded-xl border p-4">

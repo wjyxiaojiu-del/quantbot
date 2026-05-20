@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { backtestApi, templateApi } from "@/lib/api";
 import KLineChart from "@/components/charts/KLineChart";
+import EquityChart from "@/components/charts/EquityChart";
+import CodeEditor from "@/components/strategy/CodeEditor";
 
 const DEFAULT_STRATEGY = `import pandas as pd
 
@@ -191,13 +193,12 @@ export default function BacktestPage() {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-900 rounded-xl border p-4 flex flex-col" style={{ height: 400 }}>
+          <div>
             <h2 className="font-bold mb-3">策略代码</h2>
-            <textarea
+            <CodeEditor
               value={code}
-              onChange={e => setCode(e.target.value)}
-              className="flex-1 w-full px-3 py-2 border rounded-lg text-xs font-mono resize-none dark:bg-slate-800 dark:border-slate-700"
-              spellCheck={false}
+              onChange={setCode}
+              height={350}
             />
           </div>
 
@@ -254,9 +255,11 @@ export default function BacktestPage() {
           {equityCurve.length > 0 && (
             <div className="bg-white dark:bg-slate-900 rounded-xl border p-4">
               <h2 className="font-bold mb-3">资金曲线</h2>
-              <div className="h-48">
-                <EquityChart data={equityCurve} />
-              </div>
+              <EquityChart
+                data={equityCurve}
+                benchmark={[]}
+                height={250}
+              />
             </div>
           )}
 
@@ -341,30 +344,3 @@ export default function BacktestPage() {
   );
 }
 
-function EquityChart({ data }: { data: any[] }) {
-  if (!data.length) return null;
-  const equities = data.map(d => d.equity);
-  const min = Math.min(...equities);
-  const max = Math.max(...equities);
-  const range = max - min || 1;
-  const h = 180;
-  const w = 600;
-  const points = data.map((d, i) => {
-    const x = (i / (data.length - 1)) * w;
-    const y = h - ((d.equity - min) / range) * (h - 20) - 10;
-    return `${x},${y}`;
-  }).join(" ");
-
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-full">
-      <polyline
-        points={points}
-        fill="none"
-        stroke="#3b82f6"
-        strokeWidth="1.5"
-      />
-      <text x="4" y="16" fontSize="10" fill="#94a3b8">¥{max.toLocaleString()}</text>
-      <text x="4" y={h - 4} fontSize="10" fill="#94a3b8">¥{min.toLocaleString()}</text>
-    </svg>
-  );
-}
