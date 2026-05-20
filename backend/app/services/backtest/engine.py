@@ -406,7 +406,22 @@ class BacktestEngine:
             params = {}
 
         try:
-            namespace = {}
+            # 使用安全沙箱
+            from app.services.strategy.sandbox import safe_exec_strategy, validate_strategy_code
+            valid, msg = validate_strategy_code(strategy_code)
+            if not valid:
+                return {"status": "failed", "error": f"策略代码不安全: {msg}"}
+
+            # 构建受限命名空间
+            from app.services.strategy.sandbox import ALLOWED_BUILTINS, ALLOWED_MODULES, _restricted_import
+            restricted_builtins = {
+                **ALLOWED_BUILTINS,
+                "__import__": _restricted_import,
+            }
+            namespace = {
+                "__builtins__": restricted_builtins,
+                **ALLOWED_MODULES,
+            }
             exec(strategy_code, namespace)
 
             if "generate_signals_multi" in namespace:
