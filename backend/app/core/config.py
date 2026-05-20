@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     AKSHARE_TIMEOUT: int = 30
     DATA_BATCH_SIZE: int = 1000
 
+    # CORS
+    CORS_ORIGINS: str = ""  # 逗号分隔的域名列表，空则允许所有
+
     @field_validator("SECRET_KEY")
     @classmethod
     def validate_secret_key(cls, v: str) -> str:

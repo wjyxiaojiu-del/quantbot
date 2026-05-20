@@ -1,8 +1,11 @@
 import time
 import logging
+import traceback
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+
+from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +29,20 @@ class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         except Exception as e:
             logger.exception(f"Unhandled error: {request.method} {request.url.path}")
-            return JSONResponse(
-                status_code=500,
-                content={"detail": "服务器内部错误，请稍后重试"},
-            )
+
+            settings = get_settings()
+            if settings.DEBUG:
+                # DEBUG 模式返回详细错误信息
+                return JSONResponse(
+                    status_code=500,
+                    content={
+                        "detail": str(e),
+                        "type": type(e).__name__,
+                        "traceback": traceback.format_exc(),
+                    },
+                )
+            else:
+                return JSONResponse(
+                    status_code=500,
+                    content={"detail": "服务器内部错误，请稍后重试"},
+                )

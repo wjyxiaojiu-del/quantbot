@@ -15,10 +15,16 @@ class AKShareDataSource(BaseDataSource):
     def __init__(self):
         self.name = "akshare"
     
-    def _format_date(self, d: Optional[date]) -> Optional[str]:
+    def _format_date(self, d) -> Optional[str]:
         if d is None:
             return None
-        return d.strftime("%Y%m%d")
+        if isinstance(d, str):
+            # 支持 "2023-01-01" 或 "20230101" 格式
+            d = d.replace("-", "")
+            return d[:8]
+        if isinstance(d, (date, datetime)):
+            return d.strftime("%Y%m%d")
+        return str(d)
     
     def _parse_symbol(self, symbol: str) -> tuple:
         """解析代码和交易所"""

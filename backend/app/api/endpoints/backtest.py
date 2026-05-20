@@ -14,6 +14,7 @@ router = APIRouter()
 
 
 def _load_kline_df(db: Session, symbol: str, start_date, end_date) -> pd.DataFrame:
+    """加载 K 线数据，数据库无数据时自动从数据源拉取"""
     rows = (
         db.query(StockDailyKline)
         .filter(
@@ -24,20 +25,38 @@ def _load_kline_df(db: Session, symbol: str, start_date, end_date) -> pd.DataFra
         .order_by(StockDailyKline.trade_date)
         .all()
     )
-    if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame([
-        {
-            "symbol": r.symbol,
-            "trade_date": str(r.trade_date),
-            "open": float(r.open),
-            "high": float(r.high),
-            "low": float(r.low),
-            "close": float(r.close),
-            "volume": int(r.volume),
-        }
-        for r in rows
-    ])
+
+    if rows:
+        return pd.DataFrame([
+            {
+                "symbol": r.symbol,
+                "trade_date": str(r.trade_date),
+                "open": float(r.open),
+                "high": float(r.high),
+                "low": float(r.low),
+                "close": float(r.close),
+                "volume": int(r.volume),
+            }
+            for r in rows
+        ])
+
+    # 数据库无数据，尝试从数据源自动拉取
+    from app.services.data import get_data_source_for_symbol
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        logger.info(f"数据库无 {symbol} 数据，尝试从数据源拉取...")
+        ds = get_data_source_for_symbol(symbol)
+        df = ds.fetch_kline(symbol, "daily", start_date, end_date)
+        if df is not None and not df.empty:
+            # 可选：写入数据库缓存
+            logger.info(f"成功从数据源拉取 {symbol} 数据，{len(df)} 条")
+            return df
+    except Exception as e:
+        logger.warning(f"从数据源拉取 {symbol} 失败: {e}")
+
+    return pd.DataFrame()
 
 
 @router.post("/run", response_model=BacktestResultOut)
