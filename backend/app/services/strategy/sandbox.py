@@ -64,7 +64,7 @@ BLOCKED_KEYWORDS = [
     "import os", "import sys", "import subprocess", "import socket",
     "import urllib", "import requests", "import http",
     "import shutil", "import pathlib", "import io",
-    "__import__", "eval(", "exec(", "compile(",
+    "eval(", "exec(", "compile(",
     "open(", "file(", "os.", "sys.", "subprocess.",
     "environ", "getenv", "system(",
 ]
@@ -84,6 +84,14 @@ def validate_strategy_code(code: str) -> Tuple[bool, str]:
         return False, "必须定义 generate_signals(df, params) 函数"
 
     return True, "通过"
+
+
+def _restricted_import(name, *args, **kwargs):
+    """限制 import 只允许 pandas/numpy"""
+    allowed = {"pandas", "numpy", "pd", "np"}
+    if name in allowed:
+        return __import__(name, *args, **kwargs)
+    raise ImportError(f"不允许导入模块: {name}")
 
 
 def safe_exec_strategy(code: str, df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
@@ -106,8 +114,12 @@ def safe_exec_strategy(code: str, df: pd.DataFrame, params: Dict[str, Any]) -> p
         raise ValueError(f"策略代码不安全: {msg}")
 
     # 构建受限命名空间
+    restricted_builtins = {
+        **ALLOWED_BUILTINS,
+        "__import__": _restricted_import,
+    }
     namespace = {
-        "__builtins__": ALLOWED_BUILTINS,
+        "__builtins__": restricted_builtins,
         **ALLOWED_MODULES,
     }
 
