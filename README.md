@@ -1,3 +1,5 @@
+> **中文** | [English](README_en.md)
+
 # QuantBot - 个人量化交易平台
 
 基于 FastAPI + Next.js 构建的策略研究、回测验证、模拟交易一体化平台。
