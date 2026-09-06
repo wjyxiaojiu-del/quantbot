@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, Boolean, Integer, JSON, func
+from sqlalchemy import Column, String, DateTime, Text, Boolean, Integer, JSON, func, ForeignKey
 from app.core.database import Base
 from app.core.compat import UUID
 import uuid
@@ -8,6 +8,7 @@ class Strategy(Base):
     __tablename__ = "strategies"
 
     id = Column(UUID(), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(), ForeignKey("users.id"), nullable=True, comment="用户ID")
     name = Column(String(200), nullable=False, unique=True, comment="策略名称")
     description = Column(Text, nullable=True, comment="策略描述")
     code = Column(Text, nullable=False, comment="策略代码")

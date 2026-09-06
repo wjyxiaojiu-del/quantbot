@@ -41,23 +41,6 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <header className="border-b bg-white/80 dark:bg-slate-950/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">Q</span>
-            </div>
-            <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent">QuantBot</h1>
-          </div>
-          <nav className="flex items-center gap-4 text-sm font-medium text-slate-600 dark:text-slate-400">
-            <Link href="/" className="text-blue-600">首页</Link>
-            <Link href="/market" className="hover:text-blue-600 transition-colors">行情</Link>
-            <Link href="/strategies" className="hover:text-blue-600 transition-colors">策略</Link>
-            <Link href="/backtest" className="hover:text-blue-600 transition-colors">回测</Link>
-          </nav>
-        </div>
-      </header>
-
       <div className="max-w-7xl mx-auto px-4 py-8">
         <div className="mb-8">
           <h2 className="text-3xl font-extrabold text-slate-900 dark:text-white mb-2">Dashboard</h2>
@@ -77,21 +60,21 @@ export default function Home() {
           <>
             {/* 统计卡片 */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-              <StatCard title="股票数量" value={data.market.stock_count.toLocaleString()} icon="stock" />
-              <StatCard title="K 线记录" value={data.market.kline_count.toLocaleString()} icon="chart" />
-              <StatCard title="策略数量" value={`${data.strategy.total} / ${data.strategy.active} 活跃`} icon="strategy" />
-              <StatCard title="回测次数" value={String(data.backtest.total)} sub={data.backtest.best_return != null ? `最佳 ${data.backtest.best_return}%` : undefined} icon="backtest" />
+              <StatCard title="股票数量" value={data!.market.stock_count.toLocaleString()} icon="stock" />
+              <StatCard title="K 线记录" value={data!.market.kline_count.toLocaleString()} icon="chart" />
+              <StatCard title="策略数量" value={`${data!.strategy.total} / ${data!.strategy.active} 活跃`} icon="strategy" />
+              <StatCard title="回测次数" value={String(data!.backtest.total)} sub={data!.backtest.best_return != null ? `最佳 ${data!.backtest.best_return}%` : undefined} icon="backtest" />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
               {/* 最近同步 */}
               <div className="bg-white dark:bg-slate-900 rounded-xl border p-6">
                 <h3 className="font-semibold mb-4 text-slate-700 dark:text-slate-300">最近同步</h3>
-                {data.market.latest_synced.length === 0 ? (
+                {data!.market.latest_synced.length === 0 ? (
                   <p className="text-slate-400 text-sm">暂无数据</p>
                 ) : (
                   <div className="space-y-2">
-                    {data.market.latest_synced.map((s) => (
+                    {data!.market.latest_synced.map((s) => (
                       <div key={s.symbol} className="flex justify-between text-sm">
                         <span className="font-mono">{s.symbol}</span>
                         <span className="text-slate-500">{s.date}</span>
@@ -111,12 +94,12 @@ export default function Home() {
               <div className="bg-white dark:bg-slate-900 rounded-xl border p-6">
                 <h3 className="font-semibold mb-4 text-slate-700 dark:text-slate-300">回测概览</h3>
                 <div className="space-y-3">
-                  <div className="flex justify-between"><span className="text-slate-500">总回测次数</span><span className="font-medium">{data.backtest.total}</span></div>
-                  {data.backtest.best_return != null && (
-                    <div className="flex justify-between"><span className="text-slate-500">最佳收益</span><span className="font-medium text-red-600">+{data.backtest.best_return}%</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">总回测次数</span><span className="font-medium">{data!.backtest.total}</span></div>
+                  {data!.backtest.best_return != null && (
+                    <div className="flex justify-between"><span className="text-slate-500">最佳收益</span><span className="font-medium text-red-600">+{data!.backtest.best_return}%</span></div>
                   )}
-                  {data.backtest.best_name && (
-                    <div className="flex justify-between"><span className="text-slate-500">最佳策略</span><span className="font-medium">{data.backtest.best_name}</span></div>
+                  {data!.backtest.best_name && (
+                    <div className="flex justify-between"><span className="text-slate-500">最佳策略</span><span className="font-medium">{data!.backtest.best_name}</span></div>
                   )}
                 </div>
                 <Link href="/backtest" className="mt-4 block text-center text-sm text-blue-600 hover:underline">去回测 →</Link>
@@ -124,10 +107,11 @@ export default function Home() {
             </div>
 
             {/* 快速入口 */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <QuickLink href="/market" title="行情中心" desc="实时行情与 K 线" color="blue" />
               <QuickLink href="/strategies" title="策略管理" desc="编写与管理策略" color="green" />
               <QuickLink href="/backtest" title="策略回测" desc="历史回测验证" color="purple" />
+              <QuickLink href="/trade" title="模拟交易" desc="虚拟资金下单" color="orange" />
             </div>
           </>
         )}

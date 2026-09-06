@@ -22,6 +22,14 @@ interface KLineData {
   volume: number;
 }
 
+const PERIODS = [
+  { value: "daily", label: "日K" },
+  { value: "60m", label: "60分" },
+  { value: "30m", label: "30分" },
+  { value: "15m", label: "15分" },
+  { value: "5m", label: "5分" },
+];
+
 export default function MarketPage() {
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [selectedSymbol, setSelectedSymbol] = useState("000001.SZ");
@@ -33,6 +41,9 @@ export default function MarketPage() {
   const [wsConnected, setWsConnected] = useState(false);
   const [search, setSearch] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
+  const [period, setPeriod] = useState("daily");
   const prevSymbol = useRef("");
   const searchTimer = useRef<ReturnType<typeof setTimeout>>();
 
@@ -58,18 +69,51 @@ export default function MarketPage() {
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
   }, [search, loadStocks]);
 
-  // 加载 K 线
+  // 加载 K 线（无数据时自动同步）
   const loadKLine = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await marketApi.getKLine(selectedSymbol, { period: "daily", limit: 500 });
-      setKlineData(res.data || []);
+      let data;
+      if (period === "daily") {
+        const res = await marketApi.getKLine(selectedSymbol, { period: "daily", limit: 500 });
+        data = res.data || [];
+      } else {
+        const res = await marketApi.getMinuteKLine(selectedSymbol, { period, limit: 500 });
+        data = res.data || [];
+      }
+
+      if (data.length === 0) {
+        // 自动同步
+        setSyncMsg("正在自动同步K线数据...");
+        try {
+          let syncRes;
+          if (period === "daily") {
+            syncRes = await marketApi.syncKLine({ symbols: [selectedSymbol] });
+          } else {
+            syncRes = await marketApi.syncMinuteKLine(selectedSymbol, { period, days: 5 });
+          }
+          const d = syncRes.data;
+          if (d.success_count > 0 || d.inserted > 0) {
+            setSyncMsg(`同步完成`);
+            loadKLine(); // 重新加载
+          } else {
+            setSyncMsg("同步失败: " + (d.errors?.join(", ") || "无数据"));
+            setKlineData([]);
+          }
+        } catch (e: any) {
+          setSyncMsg("同步失败: " + (e.response?.data?.detail || e.message));
+          setKlineData([]);
+        }
+      } else {
+        setKlineData(data);
+        setSyncMsg("");
+      }
     } catch {
       setKlineData([]);
     } finally {
       setLoading(false);
     }
-  }, [selectedSymbol]);
+  }, [selectedSymbol, period]);
 
   useEffect(() => { loadKLine(); }, [loadKLine]);
 
@@ -95,59 +139,70 @@ export default function MarketPage() {
     } catch {}
   };
 
+  const handleSyncKLine = async () => {
+    setSyncing(true);
+    setSyncMsg("正在同步...");
+    try {
+      const res = await marketApi.syncKLine({ symbols: [selectedSymbol] });
+      const d = res.data;
+      setSyncMsg(d.success ? `同步成功，插入 ${d.success_count} 条` : `部分失败: ${d.errors?.join(", ") || "未知错误"}`);
+      loadKLine();
+    } catch (e: any) {
+      setSyncMsg("失败: " + (e.response?.data?.detail || e.message));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <header className="border-b bg-white dark:bg-slate-900 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-4 py-6 flex gap-6" style={{ height: "calc(100vh - 4rem)" }}>
+        {/* 左侧：标题+股票列表 */}
+        <div className="w-64 flex-shrink-0 flex flex-col gap-4">
           <div className="flex items-center gap-3">
-            <h1 className="text-lg font-bold">行情看板</h1>
+            <h2 className="text-xl font-bold">行情看板</h2>
             <span className={`w-2 h-2 rounded-full ${wsConnected ? "bg-green-500" : "bg-slate-300"}`} title={wsConnected ? "WS 已连接" : "WS 未连接"} />
           </div>
-          <a href="/" className="text-sm text-slate-500 hover:text-blue-600">← 返回首页</a>
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto px-4 py-6 flex gap-6" style={{ height: "calc(100vh - 3.5rem)" }}>
-        {/* 股票列表 */}
-        <div className="w-64 flex-shrink-0 bg-white dark:bg-slate-900 rounded-xl border overflow-hidden flex flex-col">
-          <div className="p-3 border-b">
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="搜索代码或名称..."
-              className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-slate-800 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            {searchLoading ? (
-              <div className="p-4 space-y-3">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <div key={i} className="animate-pulse">
-                    <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-20 mb-1" />
-                    <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-16" />
-                  </div>
-                ))}
-              </div>
-            ) : stocks.length === 0 ? (
-              <div className="p-4 text-center text-sm text-slate-400">
-                {search ? "未找到匹配股票" : "暂无数据，请先同步股票列表"}
-              </div>
-            ) : (
-              stocks.map(stock => (
-                <button
-                  key={stock.symbol}
-                  onClick={() => setSelectedSymbol(stock.symbol)}
-                  className={`w-full text-left px-4 py-3 border-b last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${
-                    selectedSymbol === stock.symbol
-                      ? "bg-blue-50 dark:bg-blue-900/20 border-l-4 border-l-blue-600"
-                      : "border-l-4 border-l-transparent"
-                  }`}
-                >
-                  <div className="font-medium text-sm">{stock.name}</div>
-                  <div className="text-xs text-slate-500">{stock.symbol}</div>
-                </button>
-              ))
-            )}
+          <div className="bg-white dark:bg-slate-900 rounded-xl border overflow-hidden flex flex-col flex-1">
+            <div className="p-3 border-b">
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="搜索代码或名称..."
+                className="w-full px-3 py-2 border rounded-lg text-sm dark:bg-slate-800 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {searchLoading ? (
+                <div className="p-4 space-y-3">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <div key={i} className="animate-pulse">
+                      <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-20 mb-1" />
+                      <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-16" />
+                    </div>
+                  ))}
+                </div>
+              ) : stocks.length === 0 ? (
+                <div className="p-4 text-center text-sm text-slate-400">
+                  {search ? "未找到匹配股票" : "暂无数据，请先同步股票列表"}
+                </div>
+              ) : (
+                stocks.map(stock => (
+                  <button
+                    key={stock.symbol}
+                    onClick={() => setSelectedSymbol(stock.symbol)}
+                    className={`w-full text-left px-4 py-3 border-b last:border-b-0 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${
+                      selectedSymbol === stock.symbol
+                        ? "bg-blue-50 dark:bg-blue-900/20 border-l-4 border-l-blue-600"
+                        : "border-l-4 border-l-transparent"
+                    }`}
+                  >
+                    <div className="font-medium text-sm">{stock.name}</div>
+                    <div className="text-xs text-slate-500">{stock.symbol}</div>
+                  </button>
+                ))
+              )}
+            </div>
           </div>
         </div>
 
@@ -197,11 +252,34 @@ export default function MarketPage() {
           {/* K 线图 */}
           <div className="flex-1 bg-white dark:bg-slate-900 rounded-xl border overflow-hidden flex flex-col min-h-0">
             <div className="p-4 border-b flex items-center justify-between flex-shrink-0">
-              <h2 className="font-bold">{selectedSymbol} — 日 K 线图</h2>
-              <button onClick={loadKLine} disabled={loading} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg text-sm font-medium">
-                {loading ? "加载中..." : "刷新"}
-              </button>
+              <div className="flex items-center gap-3">
+                <h2 className="font-bold">{selectedSymbol}</h2>
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
+                  {PERIODS.map(p => (
+                    <button
+                      key={p.value}
+                      onClick={() => setPeriod(p.value)}
+                      className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                        period === p.value
+                          ? "bg-white dark:bg-slate-700 text-blue-600 shadow-sm"
+                          : "text-slate-600 dark:text-slate-400 hover:text-blue-600"
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={handleSyncKLine} disabled={syncing} className="px-3 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white rounded-lg text-sm font-medium">
+                  {syncing ? "同步中..." : "同步K线"}
+                </button>
+                <button onClick={loadKLine} disabled={loading} className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg text-sm font-medium">
+                  {loading ? "加载中..." : "刷新"}
+                </button>
+              </div>
             </div>
+            {syncMsg && <div className="px-4 py-2 text-xs text-slate-500 border-b">{syncMsg}</div>}
             <div className="flex-1 p-4">
               {loading ? (
                 <div className="h-full flex items-center justify-center">

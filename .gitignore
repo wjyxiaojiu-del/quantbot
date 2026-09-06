@@ -57,3 +57,5 @@ backend/backtest_results.json
 backend/run_backtest*.py
 backend/*=.py
 frontend/tsconfig.tsbuildinfo
+
+.turbo/

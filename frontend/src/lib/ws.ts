@@ -4,6 +4,7 @@ class QuoteSocket {
   private ws: WebSocket | null = null;
   private handlers: Map<string, Set<MessageHandler>> = new Map();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingSubscribes: Set<string> = new Set();
   private url: string;
 
   constructor() {
@@ -11,20 +12,27 @@ class QuoteSocket {
     this.url = base.replace(/^http/, "ws") + "/api/v1/ws/quotes";
   }
 
+  private safeSend(msg: object) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msg));
+    }
+  }
+
   connect() {
-    if (this.ws?.readyState === WebSocket.OPEN) return;
+    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) return;
 
-    this.ws = new WebSocket(this.url);
+    const ws = new WebSocket(this.url);
+    this.ws = ws;
 
-    this.ws.onopen = () => {
+    ws.onopen = () => {
+      if (this.ws !== ws) return; // stale instance
       console.log("[WS] connected");
-      // 重新订阅
       for (const symbol of Array.from(this.handlers.keys())) {
-        this.ws?.send(JSON.stringify({ action: "subscribe", symbol }));
+        this.safeSend({ action: "subscribe", symbol });
       }
     };
 
-    this.ws.onmessage = (event) => {
+    ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === "quote" && msg.symbol) {
@@ -33,13 +41,15 @@ class QuoteSocket {
       } catch {}
     };
 
-    this.ws.onclose = () => {
+    ws.onclose = () => {
+      if (this.ws !== ws) return;
+      this.ws = null;
       console.log("[WS] disconnected, reconnecting in 3s...");
       this.reconnectTimer = setTimeout(() => this.connect(), 3000);
     };
 
-    this.ws.onerror = () => {
-      this.ws?.close();
+    ws.onerror = () => {
+      ws.close();
     };
   }
 
@@ -48,17 +58,12 @@ class QuoteSocket {
       this.handlers.set(symbol, new Set());
     }
     this.handlers.get(symbol)!.add(handler);
-
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ action: "subscribe", symbol }));
-    }
+    this.safeSend({ action: "subscribe", symbol });
   }
 
   unsubscribe(symbol: string) {
     this.handlers.delete(symbol);
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ action: "unsubscribe", symbol }));
-    }
+    this.safeSend({ action: "unsubscribe", symbol });
   }
 
   disconnect() {

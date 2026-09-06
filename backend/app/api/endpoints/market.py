@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import date
+from datetime import date, timedelta
 
 from app.core.database import get_db
 from app.services.data import get_data_source
@@ -109,6 +109,58 @@ async def sync_all_stocks(db: Session = Depends(get_db)):
     manager = DataSyncManager(db)
     count = await manager.sync_stock_list()
     return {"message": f"同步完成，共 {count} 只股票"}
+
+
+@router.post("/stocks/{symbol}/sync-minute")
+async def sync_minute_kline(
+    symbol: str,
+    period: str = Query("5m", pattern="^(5m|15m|30m|60m)$"),
+    days: int = Query(5, ge=1, le=30),
+    db: Session = Depends(get_db)
+):
+    """同步分钟K线数据"""
+    manager = DataSyncManager(db)
+    start_date = date.today() - timedelta(days=days)
+    result = await manager.sync_minute_kline(symbol, period, start_date)
+    return result
+
+
+@router.get("/stocks/{symbol}/minute-kline", response_model=List[dict])
+async def get_minute_kline(
+    symbol: str,
+    period: str = Query("5m", pattern="^(5m|15m|30m|60m)$"),
+    limit: int = Query(500, ge=1, le=2000),
+    db: Session = Depends(get_db)
+):
+    """获取分钟K线数据"""
+    from app.models.kline import StockMinuteKline
+    from sqlalchemy import desc
+
+    items = (
+        db.query(StockMinuteKline)
+        .filter(
+            StockMinuteKline.symbol == symbol,
+            StockMinuteKline.period == period,
+        )
+        .order_by(desc(StockMinuteKline.trade_time))
+        .limit(limit)
+        .all()
+    )
+
+    return [
+        {
+            "symbol": item.symbol,
+            "trade_time": item.trade_time.isoformat(),
+            "period": item.period,
+            "open": float(item.open),
+            "high": float(item.high),
+            "low": float(item.low),
+            "close": float(item.close),
+            "volume": item.volume,
+            "amount": float(item.amount),
+        }
+        for item in sorted(items, key=lambda x: x.trade_time)
+    ]
 
 
 # ── 全球市场（yfinance）──

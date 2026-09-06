@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import Link from "next/link";
-import { backtestApi, templateApi } from "@/lib/api";
+import { useSearchParams, useRouter } from "next/navigation";
+import { backtestApi, templateApi, tradeApi, marketApi } from "@/lib/api";
 import KLineChart from "@/components/charts/KLineChart";
 import EquityChart from "@/components/charts/EquityChart";
 import CodeEditor from "@/components/strategy/CodeEditor";
@@ -47,7 +48,10 @@ interface Metrics {
   final_equity: number;
 }
 
-export default function BacktestPage() {
+function BacktestForm() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
   const [code, setCode] = useState(DEFAULT_STRATEGY);
   const [symbol, setSymbol] = useState("000001.SZ");
   const [symbols, setSymbols] = useState<string[]>(["000001.SZ"]);
@@ -66,16 +70,93 @@ export default function BacktestPage() {
   const [history, setHistory] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
-  useEffect(() => {
-    templateApi.list().then(res => setTemplates(res.data || [])).catch(() => {});
-    loadHistory();
-  }, []);
+  // 回测结果一键下单
+  const [portfolios, setPortfolios] = useState<{ id: string; name: string }[]>([]);
+  const [showTradePanel, setShowTradePanel] = useState(false);
+  const [tradePortfolioId, setTradePortfolioId] = useState("");
+  const [tradeQuantity, setTradeQuantity] = useState(100);
+  const [tradeLoading, setTradeLoading] = useState(false);
 
-  const loadHistory = async () => {
+  const loadHistory = useCallback(async () => {
     try {
       const res = await backtestApi.history({ page_size: 10 });
       setHistory(res.data?.items || []);
     } catch {}
+  }, []);
+
+  // 从 URL 初始化参数
+  useEffect(() => {
+    const s = searchParams.get("symbols");
+    const start = searchParams.get("start");
+    const end = searchParams.get("end");
+    const cash = searchParams.get("cash");
+    const short = searchParams.get("short");
+    const long = searchParams.get("long");
+    const codeParam = searchParams.get("code");
+
+    if (s) {
+      const arr = s.split(",").map(x => x.trim()).filter(Boolean);
+      setSymbols(arr);
+      if (arr.length === 1) setSymbol(arr[0]);
+    }
+    if (start) setStartDate(start);
+    if (end) setEndDate(end);
+    if (cash) setInitialCash(Number(cash));
+    if (short) setShortWindow(Number(short));
+    if (long) setLongWindow(Number(long));
+    if (codeParam) setCode(decodeURIComponent(codeParam));
+
+    templateApi.list().then(res => setTemplates(res.data || [])).catch(() => {});
+    loadHistory();
+    tradeApi.listPortfolios().then(res => {
+      const list = res.data || [];
+      setPortfolios(list);
+      if (list.length > 0) setTradePortfolioId(list[0].id);
+    }).catch(() => {});
+  }, []);
+
+  // 同步参数到 URL（debounce）
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams();
+      if (symbols.length > 0) params.set("symbols", symbols.join(","));
+      if (startDate) params.set("start", startDate);
+      if (endDate) params.set("end", endDate);
+      if (initialCash !== 1000000) params.set("cash", String(initialCash));
+      if (shortWindow !== 5) params.set("short", String(shortWindow));
+      if (longWindow !== 20) params.set("long", String(longWindow));
+      if (code !== DEFAULT_STRATEGY) params.set("code", encodeURIComponent(code));
+      router.replace(`/backtest?${params.toString()}`, { scroll: false });
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [symbols, startDate, endDate, initialCash, shortWindow, longWindow, code]);
+
+  const handleTradeFromBacktest = async () => {
+    if (!tradePortfolioId || trades.length === 0) return;
+    const lastTrade = trades[trades.length - 1];
+    const tradeSymbol = lastTrade.symbol || symbols[0] || symbol;
+    setTradeLoading(true);
+    try {
+      const rt = await marketApi.getRealtime(tradeSymbol);
+      const price = rt.data?.data?.["最新"];
+      if (typeof price !== "number") {
+        setError("无法获取最新价格，请稍后重试");
+        setTradeLoading(false);
+        return;
+      }
+      await tradeApi.placeOrder(tradePortfolioId, {
+        symbol: tradeSymbol,
+        side: lastTrade.side,
+        price,
+        quantity: tradeQuantity,
+      });
+      setShowTradePanel(false);
+      alert(`下单成功: ${lastTrade.side === "buy" ? "买入" : "卖出"} ${tradeSymbol} ${tradeQuantity}股 @ ¥${price}`);
+    } catch (err: any) {
+      setError("下单失败: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setTradeLoading(false);
+    }
   };
 
   const loadTemplate = (id: string) => {
@@ -123,14 +204,9 @@ export default function BacktestPage() {
 
   return (
     <main className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <header className="border-b bg-white dark:bg-slate-900 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
-          <h1 className="text-lg font-bold">策略回测</h1>
-          <Link href="/" className="text-sm text-slate-500 hover:text-blue-600">← 返回首页</Link>
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="max-w-7xl mx-auto px-4 py-6">
+        <h2 className="text-2xl font-bold mb-6">策略回测</h2>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* 左侧：策略编辑 */}
         <div className="space-y-4">
           <div className="bg-white dark:bg-slate-900 rounded-xl border p-4">
@@ -249,6 +325,52 @@ export default function BacktestPage() {
                 <span className="text-slate-500">初始资金: ¥{metrics.initial_cash.toLocaleString()}</span>
                 <span className="font-bold">最终资产: ¥{metrics.final_equity.toLocaleString()}</span>
               </div>
+              <button
+                onClick={() => setShowTradePanel(!showTradePanel)}
+                className="mt-3 w-full py-2 border border-blue-200 text-blue-600 rounded-lg text-sm font-medium hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+              >
+                {showTradePanel ? "收起下单面板" : "按最后信号模拟下单"}
+              </button>
+              {showTradePanel && (
+                <div className="mt-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-lg space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-slate-500">目标组合</label>
+                      <select
+                        value={tradePortfolioId}
+                        onChange={(e) => setTradePortfolioId(e.target.value)}
+                        className="w-full mt-1 px-3 py-2 border rounded-lg text-sm dark:bg-slate-800 dark:border-slate-700"
+                      >
+                        {portfolios.map(p => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-500">数量</label>
+                      <input
+                        type="number"
+                        value={tradeQuantity}
+                        onChange={(e) => setTradeQuantity(Number(e.target.value))}
+                        step={100}
+                        className="w-full mt-1 px-3 py-2 border rounded-lg text-sm dark:bg-slate-800 dark:border-slate-700"
+                      />
+                    </div>
+                  </div>
+                  {trades.length > 0 && (
+                    <div className="text-xs text-slate-500">
+                      将按最后信号下单：{trades[trades.length - 1].side === "buy" ? "买入" : "卖出"} {trades[trades.length - 1].symbol || symbols[0] || symbol} {tradeQuantity}股
+                    </div>
+                  )}
+                  <button
+                    onClick={handleTradeFromBacktest}
+                    disabled={tradeLoading || !tradePortfolioId || trades.length === 0}
+                    className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg text-sm font-medium"
+                  >
+                    {tradeLoading ? "提交中..." : "确认下单"}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -340,7 +462,16 @@ export default function BacktestPage() {
           )}
         </div>
       </div>
+      </div>
     </main>
+  );
+}
+
+export default function BacktestPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center"><div className="animate-spin h-8 w-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>}>
+      <BacktestForm />
+    </Suspense>
   );
 }
 

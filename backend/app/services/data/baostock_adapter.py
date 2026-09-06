@@ -59,16 +59,25 @@ class BaostockDataSource(BaseDataSource):
         symbol = self.normalize_symbol(symbol)
         bs_code = _to_bs_code(symbol)
 
-        freq_map = {"daily": "d", "weekly": "w", "monthly": "m"}
+        freq_map = {
+            "daily": "d", "weekly": "w", "monthly": "m",
+            "5m": "5", "15m": "15", "30m": "30", "60m": "60",
+        }
         freq = freq_map.get(period, "d")
 
         start = start_date.strftime("%Y-%m-%d") if start_date else "2010-01-01"
         end = end_date.strftime("%Y-%m-%d") if end_date else date.today().strftime("%Y-%m-%d")
 
+        # 分钟线需要 time 字段
+        if freq in ("5", "15", "30", "60"):
+            fields = "date,time,open,high,low,close,volume,amount"
+        else:
+            fields = "date,open,high,low,close,volume,amount,turn,pctChg"
+
         try:
             rs = bs.query_history_k_data_plus(
                 bs_code,
-                "date,open,high,low,close,volume,amount,turn,pctChg",
+                fields,
                 start_date=start,
                 end_date=end,
                 frequency=freq,
@@ -93,15 +102,29 @@ class BaostockDataSource(BaseDataSource):
 
         # 类型转换
         df["symbol"] = symbol
-        df["trade_date"] = pd.to_datetime(df["date"]).dt.date
+
+        # 分钟线有 time 字段，日线只有 date
+        is_minute = "time" in df.columns
+        if is_minute:
+            # 分钟线：20250520093500000 -> datetime
+            df["trade_date"] = pd.to_datetime(df["time"].str[:14], format="%Y%m%d%H%M%S")
+        else:
+            df["trade_date"] = pd.to_datetime(df["date"]).dt.date
+
         df["open"] = df["open"].astype(float)
         df["high"] = df["high"].astype(float)
         df["low"] = df["low"].astype(float)
         df["close"] = df["close"].astype(float)
-        df["volume"] = (df["volume"].astype(float) / 100).astype(int)  # 股→手，与东方财富对齐
+        df["volume"] = (df["volume"].astype(float) / 100).astype(int)  # 股→手
         df["amount"] = df["amount"].astype(float)
-        df["change_pct"] = pd.to_numeric(df["pctChg"], errors="coerce")
-        df["turnover"] = pd.to_numeric(df["turn"], errors="coerce")
+
+        # 分钟线没有换手率和涨跌幅
+        if not is_minute:
+            df["change_pct"] = pd.to_numeric(df["pctChg"], errors="coerce")
+            df["turnover"] = pd.to_numeric(df["turn"], errors="coerce")
+        else:
+            df["change_pct"] = None
+            df["turnover"] = None
 
         columns = ["symbol", "trade_date", "open", "high", "low", "close",
                     "volume", "amount", "change_pct", "turnover"]

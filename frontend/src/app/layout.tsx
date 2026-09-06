@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import Navbar from "@/components/layout/Navbar";
 
 export const metadata: Metadata = {
   title: "QuantBot - 量化交易平台",
@@ -14,7 +15,10 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <body className="min-h-screen bg-background font-sans antialiased">
-        {children}
+        <Navbar />
+        <div className="pt-0">
+          {children}
+        </div>
       </body>
     </html>
   );

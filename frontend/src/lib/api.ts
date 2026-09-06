@@ -8,6 +8,15 @@ const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+// ── 认证 ──
+export const authApi = {
+  register: (data: { username: string; email: string; password: string }) =>
+    api.post("/auth/register", data),
+  login: (data: { username: string; password: string }) =>
+    api.post("/auth/login", data),
+  me: () => api.get("/auth/me"),
+};
+
 // ── 策略模板 ──
 export const templateApi = {
   list: () => api.get("/templates"),
@@ -16,16 +25,20 @@ export const templateApi = {
 
 // ── 行情 ──
 export const marketApi = {
-  getStocks: (params?: { exchange?: string; page?: number; page_size?: number }) =>
+  getStocks: (params?: { exchange?: string; page?: number; page_size?: number; search?: string }) =>
     api.get("/market/stocks", { params }),
   getKLine: (symbol: string, params?: { period?: string; start_date?: string; end_date?: string; limit?: number }) =>
     api.get(`/market/stocks/${symbol}/kline`, { params }),
+  getMinuteKLine: (symbol: string, params?: { period?: string; limit?: number }) =>
+    api.get(`/market/stocks/${symbol}/minute-kline`, { params }),
   getRealtime: (symbol: string) =>
     api.get(`/market/stocks/${symbol}/realtime`),
   syncStocks: () =>
     api.post("/market/stocks/sync-all"),
   syncKLine: (data: { symbols?: string[]; period?: string; start_date?: string; end_date?: string }) =>
     api.post("/market/sync", data),
+  syncMinuteKLine: (symbol: string, params?: { period?: string; days?: number }) =>
+    api.post(`/market/stocks/${symbol}/sync-minute`, null, { params }),
 };
 
 // ── 策略 ──
@@ -38,6 +51,8 @@ export const strategyApi = {
   update: (id: string, data: Record<string, any>) =>
     api.put(`/strategies/${id}`, data),
   delete: (id: string) => api.delete(`/strategies/${id}`),
+  execute: (id: string, params: { symbol: string; period?: string; days?: number }) =>
+    api.post(`/strategies/${id}/execute`, null, { params }),
 };
 
 // ── 回测 ──

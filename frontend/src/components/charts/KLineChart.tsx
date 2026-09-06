@@ -13,7 +13,8 @@ import {
 } from "lightweight-charts";
 
 interface KLineData {
-  trade_date: string;
+  trade_date?: string;
+  trade_time?: string;
   open: number;
   high: number;
   low: number;
@@ -50,6 +51,13 @@ export default function KLineChart({
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const maRefs = useRef<ISeriesApi<"Line">[]>([]);
 
+  // 获取时间字段
+  const getTime = (item: KLineData): string => {
+    const t = item.trade_time || item.trade_date || "";
+    // 分钟线格式: 2026-05-29T14:40:00 -> 2026-05-29 14:40
+    return t.replace("T", " ").substring(0, 16).replace(/-/g, "-");
+  };
+
   // 计算均线
   const calcMA = useCallback(
     (period: number): LineData[] => {
@@ -60,7 +68,7 @@ export default function KLineChart({
           sum += data[i - j].close;
         }
         result.push({
-          time: data[i].trade_date.replace(/-/g, "-") as any,
+          time: getTime(data[i]) as any,
           value: sum / period,
         });
       }
@@ -92,7 +100,7 @@ export default function KLineChart({
       },
       timeScale: {
         borderColor: "#e2e8f0",
-        timeVisible: false,
+        timeVisible: true,
       },
       height,
     });
@@ -160,7 +168,7 @@ export default function KLineChart({
       return;
 
     const candleData: CandlestickData[] = data.map((item) => ({
-      time: item.trade_date.replace(/-/g, "-") as any,
+      time: getTime(item) as any,
       open: Number(item.open),
       high: Number(item.high),
       low: Number(item.low),
@@ -168,7 +176,7 @@ export default function KLineChart({
     }));
 
     const volumeData: HistogramData[] = data.map((item) => ({
-      time: item.trade_date.replace(/-/g, "-") as any,
+      time: getTime(item) as any,
       value: Number(item.volume),
       color:
         Number(item.close) >= Number(item.open)
@@ -192,7 +200,7 @@ export default function KLineChart({
     if (signals.length > 0 && candlestickRef.current) {
       const markers = signals
         .map((s) => ({
-          time: s.trade_date.replace(/-/g, "-") as any,
+          time: s.trade_date.replace(/-/g, "-").replace("T", " ").substring(0, 16) as any,
           position: s.action === "buy" ? "belowBar" as const : "aboveBar" as const,
           color: s.action === "buy" ? "#ef4444" : "#22c55e",
           shape: s.action === "buy" ? "arrowUp" as const : "arrowDown" as const,
